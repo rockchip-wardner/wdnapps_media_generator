@@ -1,0 +1,57 @@
+{
+  "id": "media-generator",
+  "title": "文生图",
+  "category": "image",
+  "description": "输入一段文字描述，板端用 Qwen-Image-2.1 生成 512×512 图片。",
+  "version": "0.1.0",
+  "preview_video": "",
+  "preview_image": "",
+  "software_capabilities": [
+    "swcap_text_to_image"
+  ],
+  "hardware_capabilities": [],
+  "backend": {
+    "module": "wdnapps_media_generator.cards.media_generator",
+    "register_api": "register_api",
+    "register_shutdown": "register_shutdown"
+  },
+  "frontend": {
+    "template": "/static/apps/media-generator/template.html",
+    "js": [
+      "/static/apps/media-generator/app.js"
+    ],
+    "css": [
+      "/static/apps/media-generator/app.css"
+    ]
+  },
+  "demo_guard": {
+    "active_state_keys": [
+      "session.busy",
+      "session.running",
+      "session.state"
+    ],
+    "stop_endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/media-generator/stop"
+      }
+    ],
+    "stop_sync_endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/media-generator/stop"
+      }
+    ]
+  },
+  "prompts": {
+    "schema_class": "",
+    "editable_fields": [],
+    "prompt_template": ""
+  },
+  "requires_core": [
+    "compute.registry"
+  ],
+  "uploads_dir": "uploads/media_generator",
+  "display_order": 35,
+  "wizard_config": "wizard.json"
+}

@@ -1,0 +1,396 @@
+(function () {
+  "use strict";
+
+  // 文生图卡片前端。
+  //
+  // 状态有三个来源：
+  //   1. GET  /api/media-generator/          —— 首帧 + 兜底轮询
+  //   2. WS   /api/media-generator/ws        —— 状态变化推送（主）
+  //   3. POST /api/media-generator/generate  —— 发起出图
+  //
+  // 出图是重操作（8 步 ≈ 34 s，20 步 ≈ 55 s，首次还要等 worker 把模型
+  // load 进来 ≈ 90 s）⇒ 界面必须全程给出「在跑 / 还要等多久」的反馈，
+  // 而不是让用户对着一张白屏猜。
+
+  const API = "/api/media-generator";
+  const PAGE_ID = "media-generator";
+
+  const MG = {
+    ws: null,
+    wsBackoff: 1.0,
+    pollHandle: null,
+    lastSnap: null,
+    history: [],
+    started: false,
+  };
+
+  // ------------------------------------------------------------------ //
+  // 小工具
+  // ------------------------------------------------------------------ //
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function setText(el, text) {
+    if (el) el.textContent = text;
+  }
+
+  function fmtTime(epochSec) {
+    if (!epochSec) return "--";
+    const d = new Date(epochSec * 1000);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  async function postJSON(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = null;
+    }
+    if (!res.ok) {
+      const detail = (data && (data.detail || data.message)) || res.statusText;
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    return data || {};
+  }
+
+  async function getJSON(path) {
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  }
+
+  // ------------------------------------------------------------------ //
+  // 快照渲染
+  // ------------------------------------------------------------------ //
+  function renderSnapshot(snap) {
+    if (!snap) return;
+    MG.lastSnap = snap;
+
+    const banner = $("mg-unavailable");
+    const reasonEl = $("mg-unavailable-reason");
+    const genBtn = $("mg-generate");
+    const stopBtn = $("mg-stop");
+    const metaEl = $("mg-meta");
+    const statusLine = $("mg-status-line");
+    const hintEl = $("mg-hint");
+
+    const ready = !!snap.capability_ready;
+    const loading = Array.isArray(snap.capability_loading) && snap.capability_loading.length > 0;
+    const busy = !!snap.busy;
+
+    // 能力没就绪时的原因文案：**区分「在加载」和「压根没启用」** ——
+    // 前者等一等就好，后者要去算力配置页开，文案混了会误导用户。
+    let reason = "";
+    if (!ready) {
+      if (loading) {
+        reason = `模型正在加载（${snap.capability_loading.join(", ")}），首次加载约需 90 秒，请稍候。`;
+      } else {
+        reason = "文生图模型未启用，请到「算力配置」页启用 qwenimage21 实例（需要两张 NPU 卡）。";
+      }
+    }
+    if (banner && reasonEl) {
+      banner.classList.toggle("hidden", !reason);
+      setText(reasonEl, reason);
+    }
+
+    if (genBtn) {
+      genBtn.disabled = busy || !ready;
+      genBtn.title = busy ? "上一张还在生成中" : (ready ? "" : reason);
+    }
+    if (stopBtn) {
+      stopBtn.disabled = !busy;
+    }
+
+    const req = snap.request;
+    if (metaEl) {
+      if (busy && req) {
+        const secs = snap.elapsed ? `，已用 ${Math.round(snap.elapsed)} 秒` : "";
+        setText(metaEl, `正在生成（${req.steps} 步${secs}）…`);
+      } else if (snap.error) {
+        setText(metaEl, `失败：${snap.error}`);
+      } else if (snap.last) {
+        setText(metaEl, `上次生成：${snap.last.steps} 步，耗时 ${snap.last.elapsed} 秒（${fmtTime(snap.last.created_at)}）`);
+      } else {
+        setText(metaEl, "未开始");
+      }
+    }
+    if (statusLine) {
+      setText(statusLine, busy ? "生成中" : (ready ? "就绪" : (loading ? "加载中" : "未启用")));
+    }
+    if (hintEl) {
+      if (busy) {
+        setText(hintEl, "出图期间请不要关闭页面；生成完成后会自动显示。");
+      } else if (snap.error) {
+        setText(hintEl, snap.error);
+      } else {
+        setText(hintEl, "");
+      }
+    }
+
+    const raw = $("data-media-generator");
+    if (raw) {
+      try {
+        raw.textContent = JSON.stringify(snap, null, 2);
+      } catch (e) {
+        raw.textContent = String(snap);
+      }
+    }
+
+    // DemoGuard：告诉宿主「本应用现在有没有在跑后台任务」。
+    if (window.DemoGuard && typeof window.DemoGuard.report === "function") {
+      window.DemoGuard.report(PAGE_ID, { session: snap });
+    }
+  }
+
+  // ------------------------------------------------------------------ //
+  // 生成结果
+  // ------------------------------------------------------------------ //
+  function renderResult(item) {
+    const empty = $("mg-result-empty");
+    const fig = $("mg-figure");
+    const img = $("mg-image");
+    const cap = $("mg-caption-text");
+    const dl = $("mg-download");
+    if (!item || !item.url) {
+      if (fig) fig.classList.add("hidden");
+      if (empty) empty.classList.remove("hidden");
+      return;
+    }
+    if (img) {
+      // 带 run_id 的 URL 是稳定的（同一张图重复取不会 404）
+      img.src = item.url;
+    }
+    if (dl) {
+      dl.href = item.url;
+      dl.setAttribute("download", `qwenimage21-${item.run_id}.png`);
+    }
+    if (cap) {
+      setText(cap, `${item.prompt}（${item.steps} 步，${item.elapsed} 秒）`);
+    }
+    if (fig) fig.classList.remove("hidden");
+    if (empty) empty.classList.add("hidden");
+  }
+
+  function renderHistory(items) {
+    MG.history = Array.isArray(items) ? items : [];
+    const list = $("mg-history-list");
+    const count = $("mg-history-count");
+    if (count) setText(count, `${MG.history.length} 张`);
+    if (!list) return;
+    list.innerHTML = "";
+    if (!MG.history.length) {
+      const li = document.createElement("li");
+      li.className = "vd-event-empty";
+      li.textContent = "尚无生成记录，生成后结果显示在这里。";
+      list.appendChild(li);
+      return;
+    }
+    MG.history.forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "vd-event";
+      const body = document.createElement("div");
+      body.className = "vd-event-body";
+      const text = document.createElement("div");
+      text.className = "vd-event-text";
+      text.textContent = item.prompt;
+      const meta = document.createElement("div");
+      meta.className = "vd-event-meta";
+      meta.textContent = `${fmtTime(item.created_at)} · ${item.steps} 步 · ${item.elapsed} 秒`;
+      body.appendChild(text);
+      body.appendChild(meta);
+      const thumb = document.createElement("img");
+      thumb.className = "mg-thumb";
+      thumb.src = item.url;
+      thumb.alt = item.prompt;
+      thumb.loading = "lazy";
+      thumb.addEventListener("click", () => renderResult(item));
+      li.appendChild(thumb);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+  }
+
+  async function refreshHistory() {
+    try {
+      const data = await getJSON(`${API}/history`);
+      renderHistory(data.items);
+    } catch (e) {
+      /* 历史拿不到不影响出图 */
+    }
+  }
+
+  // ------------------------------------------------------------------ //
+  // 动作
+  // ------------------------------------------------------------------ //
+  async function doGenerate() {
+    const promptEl = $("mg-prompt");
+    const stepsEl = $("mg-steps");
+    const fixedEl = $("mg-fixed-noise");
+    const prompt = promptEl ? promptEl.value.trim() : "";
+    if (!prompt) {
+      const hintEl = $("mg-hint");
+      if (hintEl) setText(hintEl, "请先输入提示词。");
+      return;
+    }
+    const body = {
+      prompt,
+      steps: stepsEl ? parseInt(stepsEl.value, 10) : 8,
+      fixed_noise: fixedEl ? !!fixedEl.checked : false,
+    };
+    try {
+      await postJSON(`${API}/generate`, body);
+    } catch (e) {
+      const hintEl = $("mg-hint");
+      if (hintEl) setText(hintEl, `无法启动：${e.message || e}`);
+      await pollSnapshot();
+    }
+  }
+
+  async function doStop() {
+    try {
+      await postJSON(`${API}/stop`, {});
+    } catch (e) {
+      /* 停止失败不致命 */
+    }
+    await pollSnapshot();
+  }
+
+  async function pollSnapshot() {
+    try {
+      const snap = await getJSON(`${API}/`);
+      renderSnapshot(snap);
+    } catch (e) {
+      /* 忽略 */
+    }
+  }
+
+  // ------------------------------------------------------------------ //
+  // WebSocket
+  // ------------------------------------------------------------------ //
+  function connectWS() {
+    if (MG.ws) return;
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    let ws;
+    try {
+      ws = new WebSocket(`${proto}//${location.host}${API}/ws`);
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+    MG.ws = ws;
+    ws.onopen = () => {
+      MG.wsBackoff = 1.0;
+    };
+    ws.onmessage = (ev) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      if (!msg || msg.type !== "status") return;
+      renderSnapshot(msg);
+      const last = msg.last;
+      if (last && (!MG.lastShownRun || MG.lastShownRun !== last.run_id)) {
+        MG.lastShownRun = last.run_id;
+        renderResult(last);
+        refreshHistory();
+      }
+    };
+    ws.onclose = () => {
+      MG.ws = null;
+      scheduleReconnect();
+    };
+    ws.onerror = () => {
+      try { ws.close(); } catch (e) { /* ignore */ }
+    };
+  }
+
+  function scheduleReconnect() {
+    if (MG.wsHandle) return;
+    const delay = MG.wsBackoff;
+    MG.wsBackoff = Math.min(MG.wsBackoff * 1.6, 15);
+    MG.wsHandle = setTimeout(() => {
+      MG.wsHandle = null;
+      connectWS();
+    }, delay * 1000);
+  }
+
+  // ------------------------------------------------------------------ //
+  // 启动
+  // ------------------------------------------------------------------ //
+  function init() {
+    if (MG.started) return;
+    MG.started = true;
+
+    const genBtn = $("mg-generate");
+    if (genBtn) genBtn.addEventListener("click", doGenerate);
+    const stopBtn = $("mg-stop");
+    if (stopBtn) stopBtn.addEventListener("click", doStop);
+
+    const promptEl = $("mg-prompt");
+    if (promptEl) {
+      promptEl.addEventListener("keydown", (ev) => {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
+          ev.preventDefault();
+          doGenerate();
+        }
+      });
+    }
+
+    pollSnapshot();
+    refreshHistory();
+    connectWS();
+
+    // 兜底轮询：WS 断了也不至于完全瞎（WS 正常时这条是空转）。
+    MG.pollHandle = setInterval(pollSnapshot, 5000);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+  // ------------------------------------------------------------------ //
+  // 向导回填（wizard 框架按字段 id 去掉 "mg-" 前缀后 camelCase 传进来）
+  // ------------------------------------------------------------------ //
+  window.ImApp_media_generator = window.ImApp_media_generator || {};
+  window.ImApp_media_generator.applyWizardSnapshot = async function (opts) {
+    const result = { text_filled: false, started: false };
+    opts = opts || {};
+    if (opts.prompt) {
+      const el = $("mg-prompt");
+      if (el) {
+        el.value = opts.prompt;
+        result.text_filled = true;
+      }
+    }
+    if (opts.steps) {
+      const el = $("mg-steps");
+      if (el) el.value = String(opts.steps);
+    }
+    if (opts.fixedNoise !== undefined) {
+      const el = $("mg-fixed-noise");
+      if (el) el.checked = !!opts.fixedNoise;
+    }
+    // 提示词非空 → 直接开跑。
+    // ⚠️ 不能 btn.click()：按钮的 disabled 由 capability_ready 决定，
+    // 模型刚就绪时按钮还是灰的，而 disabled 按钮的 click() 会被浏览器
+    // **静默丢弃**（tts 卡踩过这个坑）⇒ 改成直接调 doGenerate()。
+    const el = $("mg-prompt");
+    if (el && el.value.trim()) {
+      await doGenerate();
+      result.started = true;
+    }
+    return result;
+  };
+})();

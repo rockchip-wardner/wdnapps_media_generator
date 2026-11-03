@@ -1,0 +1,72 @@
+      <section id="page-media-generator" class="page hidden" data-page="media-generator">
+        <header class="page-header">
+          <h2>文生图</h2>
+          <div class="header-meta">
+            <span class="collected-at" id="mg-status-line">--</span>
+            <button class="wizard-mode-btn" data-wizard-mode data-page-id="media-generator">向导模式</button>
+          </div>
+        </header>
+
+        <div id="mg-unavailable" class="mg-banner mg-banner-error hidden">
+          <span class="mg-banner-icon" aria-hidden="true">⚠</span>
+          <span class="mg-banner-text">
+            文生图不可用：<span id="mg-unavailable-reason">--</span>
+          </span>
+        </div>
+
+        <div class="mg-stage">
+          <textarea id="mg-prompt" class="mg-prompt" rows="3"
+                    placeholder="描述你想生成的画面，例如：一只戴红框眼镜的猫坐在木椅上"></textarea>
+
+          <div class="mg-controls">
+            <label class="mg-field">
+              <span class="mg-label">步数</span>
+              <select id="mg-steps" class="mg-select">
+                <option value="8" selected>8 步（快，约 34 秒）</option>
+                <option value="20">20 步（推荐，约 55 秒）</option>
+                <option value="28">28 步（精细，约 78 秒）</option>
+              </select>
+            </label>
+            <label class="mg-field mg-field-check" title="固定初始噪声：同一个提示词每次出同一张图，方便对拍">
+              <input type="checkbox" id="mg-fixed-noise" />
+              <span class="mg-label">固定噪声</span>
+            </label>
+            <span class="vd-spacer"></span>
+            <button id="mg-generate" class="vd-btn vd-btn-primary">生成图片</button>
+            <button id="mg-stop" class="vd-btn" disabled>停止</button>
+          </div>
+
+          <div class="mg-hint" id="mg-hint"></div>
+          <div class="mg-meta" id="mg-meta">未开始</div>
+        </div>
+
+        <section class="mg-result" id="mg-result">
+          <div class="mg-result-empty" id="mg-result-empty">
+            还没有生成结果。填一句描述，点「生成图片」。
+          </div>
+          <figure class="mg-figure hidden" id="mg-figure">
+            <img id="mg-image" class="mg-image" alt="生成的图片" />
+            <figcaption class="mg-caption">
+              <span id="mg-caption-text">--</span>
+              <span class="vd-spacer"></span>
+              <a id="mg-download" class="mg-download" download="image.png">下载 PNG</a>
+            </figcaption>
+          </figure>
+        </section>
+
+        <section class="vd-section">
+          <header class="vd-section-head">
+            <h3>生成记录</h3>
+            <span class="vd-spacer"></span>
+            <span class="vd-meta" id="mg-history-count">0 张</span>
+          </header>
+          <ol class="vd-event-list" id="mg-history-list">
+            <li class="vd-event-empty">尚无生成记录，生成后结果显示在这里。</li>
+          </ol>
+        </section>
+
+        <details class="raw-output">
+          <summary>完整 JSON</summary>
+          <pre class="payload" id="data-media-generator"></pre>
+        </details>
+      </section>

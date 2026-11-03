@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wdnapps-media-generator"
+version = "0.1.0"
+description = "wdnwebui 媒体生成类应用插件：文生图（Qwen-Image-2.1）"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "pyrk-sdk" }]
+
+# 刻意不声明 wdnwebui 依赖：宿主不是 PyPI 包，是同一个 .venv 里
+# 从仓库根直接跑的 FastAPI 服务（run.py → app.main:app）。卡片代码
+# import 的是 `app.core.*`，由 wdnwebui 自己的启动脚本把仓库根放进
+# sys.path。把 wdnwebui 写进 dependencies 会让 pip 去 PyPI 找一个
+# 不存在的同名包并直接安装失败。
+#
+# 真要表达这层耦合，宿主侧的插件发现通道（app/core/manifest.py 的
+# `_discover_from_entry_points`）才是它的位置：它 import 本包失败
+# 时只 LOG.error 并跳过，不会拖垮整个 web UI。
+#
+# wdnai / numpy 同理：wdnai 是同 .venv 里的兄弟包（不是 PyPI 包），
+# numpy 只在**回退路径**上用到（worker 直接把 PNG 落盘时不需要它，
+# 见 service.py 的 _write_png_fallback），所以列成可选依赖更诚实。
+dependencies = [
+    "pydantic>=1.10",
+    "fastapi>=0.100",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "build>=1.0"]
+image = ["numpy>=1.21"]
+
+# ---------------------------------------------------------------------------
+# 插件注册表 —— wdnwebui manifest 加载器唯一识别的 group
+#
+#   左边 = 卡片 id，必须与该卡 manifest.json 里的 "id" 逐字相同
+#           （宿主会做一致性校验，不一致直接 FATAL 跳过该卡）。
+#   右边 = 可 import 的卡片模块；宿主据此定位卡片目录
+#           （模块所在目录 + /manifest.json + /static/）
+#
+# ⚠️ id 里用**连字符**（`media-generator`），与 wdnapps-audio-chat 的
+# `tts`、wdnapps-video-analyzer 的 `video-detection` 同规则。前端的
+# JS 命名空间是 `window.ImApp_media_generator`（连字符换下划线）。
+# ---------------------------------------------------------------------------
+[project.entry-points."wdnwebui.cards"]
+"media-generator" = "wdnapps_media_generator.cards.media_generator"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["wdnapps_media_generator*"]
+exclude = ["tests*"]
+
+# 关键：template.html / app.js / app.css / wizard.json 必须进 wheel，
+# 否则宿主挂载 /static/apps/<id> 时目录是空的（卡片仍会被发现，
+# 但前端 404 —— 这正是插件化最容易踩且最难一眼看出的坑）。
+[tool.setuptools.package-data]
+"wdnapps_media_generator.cards.media_generator" = ["manifest.json", "static/*"]
