@@ -84,6 +84,15 @@ def run_dir(run_id: str) -> Path:
     return d
 
 
+def find_run_dir(run_id: str) -> Path:
+    """**只读**地定位某次生成的目录（不存在就返回一个不存在的路径）。
+
+    与 :func:`run_dir` 的区别：这里**不 mkdir** ⇒ 查一张不存在的图不会
+    在磁盘上留下空目录。
+    """
+    return output_root() / "runs" / _safe_id(run_id)
+
+
 def _safe_id(run_id: str) -> str:
     """把 run_id 收拾成能当目录名的 slug（防路径穿越）。"""
     keep = [c for c in str(run_id or "") if c.isalnum() or c in "-_"]

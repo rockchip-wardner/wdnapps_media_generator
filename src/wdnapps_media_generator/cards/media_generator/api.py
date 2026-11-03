@@ -28,6 +28,7 @@ from wdnapps_media_generator.cards.media_generator.service import (
     VALID_STEPS,
     ImageRequest,
     _first_png,
+    find_run_dir,
     get_session,
     run_dir,
 )
@@ -95,7 +96,7 @@ async def media_generator_image(run_id: str):
 
     走 ``run_id`` 而不是绝对路径 ⇒ 没有路径穿越面。
     """
-    d = run_dir(run_id)
+    d = find_run_dir(run_id)
     png = _first_png(d)
     if png is None:
         raise HTTPException(status_code=404, detail="该次生成没有图片")
