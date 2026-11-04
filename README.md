@@ -16,7 +16,7 @@ wdnwebui 的**媒体生成类**应用插件。当前提供一张卡：**图片�
 | 能力 | `swcap_text_to_image` |
 | 出图入口 | 输入一段文字 → 生成 → 展示 PNG |
 | 模型 | `qwenimage21`（算力注册中心启用的 worker 进程） |
-| 耗时 | worker 首次 load ≈ 90 s；每张图 8 步 ≈ 34 s / 20 步 ≈ 85 s / 28 步 ≈ 124 s |
+| 耗时 | worker 首次 load ≈ 90 s；每张图 8 步 ≈ 33 s / 20 步 ≈ 103 s / 28 步 ≈ 124 s |
 
 ## 架构：图是在**别的进程**里出的
 
@@ -96,7 +96,7 @@ manifest 需要 `requires_cards: 2`（TE 在卡 0、DiT+VAE 在卡 1）。
 worker 侧的推理预算是「replier pump 最多被一次推理占多久」，超了就回一条
 **带原因**的错误（而不是把 pump 焊死）。它**不能是全局常量**：
 
-* 全局 60 s ⇒ 20/28 步出图（实测 85 s / 124 s）必被砍掉，报
+* 全局 60 s ⇒ 20/28 步出图（实测 103 s / 124 s）必被砍掉，报
   `TimeoutError: inference exceeded 60.0s`；
 * 全局调大 ⇒ 一个卡住的对话 worker 会长时间占着 pump。
 
