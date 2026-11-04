@@ -9,8 +9,8 @@
 * ``GET  /api/media-generator/image/{id}``   — 取某次生成的 PNG
 * ``WS   /api/media-generator/ws``           — 状态变化时推送快照
 
-⚠️ 出图是**重**操作（8 步 ≈ 34 s，20 步 ≈ 55 s，首次还要等 worker 把
-模型 load 进来 ≈ 90 s）⇒ ``generate`` 绝不能同步等图，接口只负责
+⚠️ 出图是**重**操作（8 步 ≈ 35 s，20 步 ≈ 63 s，28 步 ≈ 90 s，首次还要等
+worker 把模型 load 进来 ≈ 90 s）⇒ ``generate`` 绝不能同步等图，接口只负责
 「收下请求 + 起线程 + 立刻回话」，结果靠 WS / 轮询拿。
 """
 from __future__ import annotations

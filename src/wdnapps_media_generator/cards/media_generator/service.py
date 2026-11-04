@@ -13,8 +13,12 @@
 多个消费者（卡片 / LAN 对端）。这与 TTS 卡是同一套机制。
 
 ⚠️ 耗时（板端实测，2×RK1828）：worker 首次 load 要 ~90 s（TE + DiT
-常驻），之后**每张图 ≈ 34 s**（8 步）。所以本模块的所有接口都是
+常驻），之后**每张图 34~90 s**（8 / 20 / 28 步）。所以本模块的所有接口都是
 **异步**的：``generate`` 立刻返回，前端用 WebSocket 收状态。
+
+⚠️ **超时**：worker 侧的推理预算是**每模型**的（写在 worker manifest 的
+``infer_timeout_s`` 里，文生图是 300 s）—— 全局默认 60 s 会把 20/28 步
+的出图砍掉（``inference exceeded 60.0s``）。
 """
 from __future__ import annotations
 
@@ -44,6 +48,41 @@ DEFAULT_STEPS = 8
 
 #: 历史里最多保留多少张图（更早的连同落盘文件一起删）。
 MAX_HISTORY = 50
+
+
+# --------------------------------------------------------------------------- #
+# 错误可读化
+# --------------------------------------------------------------------------- #
+#: 把 worker / 传输层的原始异常翻成一句人话。
+#:
+#: 原始错误形如
+#: ``RuntimeError: LLMRPCSession[wdndds/rpc/qwenimage21/worker-70476] worker
+#: error: TimeoutError: inference exceeded 60.0s`` —— 对普通用户毫无意义。
+#: 这里只做**翻译**，不改变错误类型，也不吞掉原始信息（原文附在后面）。
+_ERROR_HINTS = (
+    ("inference exceeded",
+     "推理超时：worker 侧的推理预算用完了（NPU 可能卡住了）。"
+     "请到「算力配置」页停掉再启用这个实例。"),
+    ("session not loaded",
+     "模型还没加载完（首次 load 约 90 秒），请等加载完成再试。"),
+    ("no data",
+     "worker 没有回话（链路断了），请到「算力配置」页重启这个实例。"),
+)
+
+
+def friendly_error(exc: BaseException) -> str:
+    """把异常变成一句中文说明（原文照附在后面）。
+
+    用来把 ``RuntimeError: ... worker error: TimeoutError: inference
+    exceeded 60.0s`` 这种传输层原文变成「推理超时：…」——
+    **不改变语义**，原文仍然保留在 ``（原文：…）`` 里，方便排查。
+    """
+    raw = f"{type(exc).__name__}: {exc}"
+    low = raw.lower()
+    for needle, hint in _ERROR_HINTS:
+        if needle in low:
+            return "{}（原文：{}）".format(hint, raw)
+    return raw
 
 
 # --------------------------------------------------------------------------- #
@@ -365,7 +404,8 @@ class MediaGenSession:
     状态：``idle`` → ``running`` → ``idle`` / ``error``。
 
     生成在**独立线程**里跑（``asyncio.run`` 包一层）：FastAPI 的事件
-    循环不能被一次 34 s（8 步）/ 55 s（20 步）的 NPU 调用堵住。
+    循环不能被一次 35 s（8 步）/ 63 s（20 步）/ 90 s（28 步）的 NPU
+    调用堵住。
     """
 
     STATE_IDLE = "idle"
@@ -468,16 +508,37 @@ class MediaGenSession:
     def start(self, req: ImageRequest) -> dict:
         """启动一次生成（**立即返回**，不等图出来）。
 
-        已经在跑 ⇒ 拒绝（文生图是**重**能力：34~55 s 一张，排队没有意义，
+        已经在跑 ⇒ 拒绝（文生图是**重**能力：34~90 s 一张，排队没有意义，
         用户自己再点一次更清楚）。
+
+        模型**还没加载完** ⇒ 也拒绝，但要说清楚是「在加载」还是「压根没
+        启用」—— 前者等 90 秒就好，后者要去算力配置页开。前端已经按
+        ``capability_ready`` 禁用了按钮，这里是同一道闸的**后端**版本：
+        防的是「快照与点击之间 worker 掉了」这种竞态。
         """
+        # ① 入参校验 —— 纯本地，先做。用户提示词没填就没必要去问
+        #    registry「模型在不在」，回一句「提示词不能为空」最直接。
+        if not req.prompt:
+            return {"ok": False, "reason": "empty_prompt",
+                    "message": "提示词不能为空"}
+        # ② 就绪探测 —— **锁外**做（它要走 registry / DDS，是 I/O；
+        #    ``snapshot()`` 也要做同样的探测，在锁里做会把它一起堵住）。
+        if not self._probe_ready():
+            loading = self._probe_loading()
+            if loading:
+                return {"ok": False, "reason": "loading",
+                        "message": "模型正在加载（{}），首次约需 90 秒，"
+                                   "加载完成后再试".format(", ".join(loading))}
+            return {"ok": False, "reason": "not_ready",
+                    "message": "图片生成模型未启用，请到「算力配置」页启用 "
+                               "qwenimage21 实例（需要两张 NPU 卡）"}
+        # ③ 状态迁移 —— 锁内一次做完：busy 检查与「置成 running」在同一个
+        #    临界区里 ⇒ 两个并发的 start() 只有一个能进去（另一个看到
+        #    STATE_RUNNING 就返回 busy），不会同时起两条生成线程。
         with self._lock:
             if self._state == self.STATE_RUNNING:
                 return {"ok": False, "reason": "busy",
                         "message": "上一张还在生成中，请等它完成"}
-            if not req.prompt:
-                return {"ok": False, "reason": "empty_prompt",
-                        "message": "提示词不能为空"}
             self._request = req
             self._cancel = False
             self._elapsed = 0.0
@@ -514,7 +575,7 @@ class MediaGenSession:
             LOG.exception("media_generator: 生成失败")
             with self._lock:
                 self._elapsed = time.time() - t0
-            self._set_state(self.STATE_ERROR, f"{type(exc).__name__}: {exc}")
+            self._set_state(self.STATE_ERROR, friendly_error(exc))
             return
 
         with self._lock:

@@ -16,7 +16,7 @@ wdnwebui 的**媒体生成类**应用插件。当前提供一张卡：**图片�
 | 能力 | `swcap_text_to_image` |
 | 出图入口 | 输入一段文字 → 生成 → 展示 PNG |
 | 模型 | `qwenimage21`（算力注册中心启用的 worker 进程） |
-| 耗时 | worker 首次 load ≈ 90 s；每张图 8 步 ≈ 34 s / 20 步 ≈ 55 s |
+| 耗时 | worker 首次 load ≈ 90 s；每张图 8 步 ≈ 34 s / 20 步 ≈ 85 s / 28 步 ≈ 124 s |
 
 ## 架构：图是在**别的进程**里出的
 
@@ -91,6 +91,25 @@ manifest 里 `model_dir_env = WDNAI_QWEN_IMAGE_21_DIR` —— worker 启动时
 
 manifest 需要 `requires_cards: 2`（TE 在卡 0、DiT+VAE 在卡 1）。
 
+### ⚠️ `infer_timeout_s`：一次推理的预算是**每模型**的
+
+worker 侧的推理预算是「replier pump 最多被一次推理占多久」，超了就回一条
+**带原因**的错误（而不是把 pump 焊死）。它**不能是全局常量**：
+
+* 全局 60 s ⇒ 20/28 步出图（实测 85 s / 124 s）必被砍掉，报
+  `TimeoutError: inference exceeded 60.0s`；
+* 全局调大 ⇒ 一个卡住的对话 worker 会长时间占着 pump。
+
+⇒ 所以它写在 **manifest** 里（文生图 = 300 s）：
+
+```json
+"infer_timeout_s": 300
+```
+
+worker 用它当 pump 上限，Web UI 主进程用 **它 + 30 s margin** 当客户端
+RPC 预算（客户端必须比 worker 活得久，否则先超时的是客户端 ⇒ 报错没有
+原因可查）。两边读**同一个 manifest 文件** ⇒ 预算不会漂移。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
@@ -122,3 +141,8 @@ manifest 需要 `requires_cards: 2`（TE 在卡 0、DiT+VAE 在卡 1）。
   「停止」= 这一张的结果不要了。
 * **一次只跑一张**：再点「生成」会返回 409。出图是重能力，排队没有意义。
 * **步数**只影响采样步数，不影响模型（模型不用重建）。
+* **模型没加载完时不能出图**：`generate` 会返回 409 并说明是「正在加载」
+  还是「压根没启用」——别去猜，直接看提示。
+* **推理超时会翻成人话**：worker 侧报
+  `inference exceeded Ns` 时，卡片显示「推理超时：worker 侧的推理预算用完了
+  （NPU 可能卡住了）……（原文：…）」，并建议去算力配置页重启该实例。
