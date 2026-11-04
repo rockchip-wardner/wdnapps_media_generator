@@ -74,6 +74,29 @@ def test_tracker_resets_between_runs():
     assert t.snapshot() is None
 
 
+def test_tracker_start_event_is_visible_immediately():
+    """生成刚启动时的那条「启动中」事件必须立刻可见。
+
+    2026-11-04 实测修：worker 的第一条进度事件要等它真开始干活才到
+    （最快 1~4 秒）⇒ 在那之前快照里的 progress 是 None ⇒ 前端把进度条
+    整个藏起来 ⇒ 用户点了「生成图片」看着像**什么都没发生**。
+    """
+    t = ProgressTracker()
+    assert t.snapshot() is None          # 还没开始 ⇒ 没有进度
+    t.update({"stage": "start", "step": 0, "total": 8, "elapsed_ms": 0.0})
+    snap = t.snapshot()
+    assert snap is not None
+    assert snap["stage"] == "start"
+    assert snap["stage_label"] == "启动中"
+    assert snap["percent"] == 0.0        # 还没真开跑
+    assert snap["step"] == 0
+    assert snap["total"] == 8            # 启动阶段 total = 总步数
+    assert "8 步" in snap["detail"]
+    # ⚠️ eta 不能是 0 —— 前端会把 eta=0 渲染成「即将完成」，
+    # 于是启动阶段显示「启动中 · 即将完成」，自相矛盾。
+    assert snap["eta"] > 0
+
+
 def test_tracker_switching_stage_keeps_step_counts_apart():
     t = ProgressTracker()
     t.update({"stage": "flow", "step": 8, "total": 8, "elapsed_ms": 2600.0})

@@ -86,11 +86,27 @@
     return `${m} 分 ${String(s % 60).padStart(2, "0")} 秒`;
   }
 
-  function renderProgress(prog) {
+  function renderProgress(prog, busy) {
     const box = $("mg-progress");
     if (!box) return;
-    if (!prog) {
+    // ⚠️⚠️ **正在跑的时候进度条必须一直显示**（2026-11-04 实测修）。
+    // 之前是「prog 为 null ⇒ 把整个盒子 hidden」⇒ 点完生成、worker 的
+    // 第一条进度事件还没到的那几秒里，进度条**消失**了 ⇒ 用户看着像
+    // 「点了没反应、什么都没发生」。
+    if (!prog && !busy) {
       box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    if (!prog) {
+      // 正在跑、但还没有任何进度事件 ⇒ 显示一个 0% 的空条 + 人话
+      setText($("mg-progress-stage"), "启动中");
+      setText($("mg-progress-detail"), "正在把请求送到 worker …");
+      setText($("mg-progress-pct"), "0%");
+      const fill0 = $("mg-progress-fill");
+      if (fill0) fill0.style.width = "0%";
+      setText($("mg-progress-step"), "--");
+      setText($("mg-progress-eta"), "预计还需 --");
       return;
     }
     box.classList.remove("hidden");
@@ -151,6 +167,11 @@
     if (genBtn) {
       genBtn.disabled = busy || !ready;
       genBtn.title = busy ? "上一张还在生成中" : (ready ? "" : reason);
+      // 按钮文案随状态走（2026-11-04 实测修）：doGenerate 把它改成
+      // 「提交中…」之后必须有人还原 —— 不然「提交中…」会一直挂在那儿，
+      // 看着像卡住。
+      const want = busy ? "生成中…" : "生成图片";
+      if (genBtn.textContent !== want) genBtn.textContent = want;
     }
     if (stopBtn) {
       stopBtn.disabled = !busy;
@@ -174,7 +195,15 @@
     }
     if (hintEl) {
       if (busy) {
-        setText(hintEl, "出图期间请不要关闭页面；生成完成后会自动显示。");
+        // ⚠️ 说清楚**现在在做什么**（2026-11-04 用户反馈：「没提示在做什么」）
+        const p = snap.progress || {};
+        const lbl = p.stage_label || p.stage || "";
+        // detail 与阶段名相同时不重复拼（「启动中：启动中」很丑）
+        const what = p.detail && p.detail !== lbl
+          ? (lbl ? `${lbl}：${p.detail}` : p.detail)
+          : (lbl || "正在准备这次生成…");
+        const eta = p.eta ? `，预计还需 ${fmtDur(p.eta)}` : "";
+        setText(hintEl, `${what}${eta}`);
       } else if (snap.error) {
         setText(hintEl, snap.error);
       } else {
@@ -193,7 +222,7 @@
 
     // 进度条：跑的时候实时跳；跑完了**留住最后一条**（让人看清
     // 「最后一步花了多久 / 一共用了多久」），下一次生成再重置。
-    renderProgress(snap.progress || null);
+    renderProgress(snap.progress || null, !!snap.busy);
 
     // DemoGuard：告诉宿主「本应用现在有没有在跑后台任务」。
     if (window.DemoGuard && typeof window.DemoGuard.report === "function") {
@@ -296,8 +325,26 @@
       steps: stepsEl ? parseInt(stepsEl.value, 10) : 8,
       fixed_noise: fixedEl ? !!fixedEl.checked : false,
     };
+    // ⚠️⚠️ **点击后立刻给反馈**（2026-11-04 实测修）。
+    // 之前这里是 `await postJSON(...)` 然后直接返回 —— 界面**一动不动**，
+    // 要等下一次 WS 帧（最快 1 s）或兜底轮询（最慢 5 s）才知道「点了」。
+    // 在这几秒里按钮还是可点的样子（用户会连点几下），而按钮一旦被
+    // disabled，浏览器的 click 会被**静默丢弃** ⇒ 连重试都点不动。
+    // ⇒ 点击即刻：按钮禁用 + 变「提交中…」+ meta/hint 说清楚 + 进度条亮起来。
+    const genBtn = $("mg-generate");
+    const stopBtn = $("mg-stop");
+    if (genBtn) {
+      genBtn.disabled = true;
+      genBtn.textContent = "提交中…";
+    }
+    if (stopBtn) stopBtn.disabled = true;
+    setText($("mg-meta"), "正在提交…");
+    setText($("mg-hint"), "正在把提示词送到 worker，请稍候。");
+    renderProgress(null, true);
     try {
       await postJSON(`${API}/generate`, body);
+      // 立刻取一次快照 —— 不等 WS（最快 1 s）或轮询（最慢 5 s）
+      await pollSnapshot();
     } catch (e) {
       const hintEl = $("mg-hint");
       if (hintEl) setText(hintEl, `无法启动：${e.message || e}`);
@@ -441,6 +488,14 @@
     if (el && el.value.trim()) {
       await doGenerate();
       result.started = true;
+      // ⚠️ 向导页**看不到**卡片的进度条（卡片页此刻是隐藏的）⇒
+      // 必须自己说清楚「已经开始生成了，去哪儿看」（2026-11-04 用户
+      // 反馈：「点了之后一直卡在那，也没提示在做什么」）。
+      const hintEl = $("mg-hint");
+      if (hintEl) {
+        setText(hintEl,
+          "已开始生成，请到「图片生成」页看实时进度（出图期间请不要关闭页面）。");
+      }
     }
     return result;
   };

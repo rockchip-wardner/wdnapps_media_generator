@@ -95,6 +95,7 @@ PROGRESS_PREFIX = "qi|"
 
 #: 阶段 → 中文标签（前端直接显示）
 STAGE_LABELS = {
+    "start":    "启动中",
     "init":     "加载模型",
     "te":       "编码提示词",
     "flow":     "生成图像",
@@ -118,6 +119,7 @@ STAGE_ORDER = ("te", "flow", "vae", "save")
 #: 还没进入的阶段的**固定预估秒数**（板端实测值）。
 #: ETA = 当前阶段的剩余时间 + 后面这些阶段的预估值。
 STAGE_ETA_SECONDS = {
+    "start": 1.0,
     "te": 0.3, "flow": 0.0, "vae": 10.0, "save": 0.3,
     "vae_init": 2.0, "release": 0.5,
 }
@@ -240,6 +242,18 @@ class ProgressTracker:
         elif stage == "flow" and total:
             # 一个步长都还没完成 ⇒ 用板端实测的均值兜底
             eta += 2.6 * max(0, total - step)
+        else:
+            # 其它阶段（start / te / vae_init / release）：用该阶段的固定
+            # 预估。⚠️ 不能留 0 —— 前端把 eta=0 渲染成「即将完成」，于是
+            # 启动阶段会显示「启动中 · 即将完成」，自相矛盾。
+            if stage == "start":
+                # 启动阶段还**一个 flow 步都没跑** ⇒ 没有实测均值，
+                # 只能用「每步 ~3.5 s + VAE ~12 s」估（板端实测：
+                # 8 步 33 s / 20 步 103 s / 28 步 124 s）。
+                # 真正准的 ETA 要等第一个 flow 步到达（那时用实测均值）。
+                eta += 3.5 * max(0, total) + STAGE_ETA_SECONDS.get("vae", 12.0)
+            else:
+                eta += STAGE_ETA_SECONDS.get(stage, 0.0)
         # 后面还没开始的阶段
         try:
             idx = STAGE_ORDER.index(stage)
@@ -248,13 +262,15 @@ class ProgressTracker:
             rest = ()
         for st in rest:
             eta += STAGE_ETA_SECONDS.get(st, 0.0)
-        if stage in ("vae_init", "release"):
-            eta += STAGE_ETA_SECONDS.get(stage, 0.0)
 
         # ---- 人话 ----
         label = STAGE_LABELS.get(stage, stage)
         if stage == "flow":
             detail = "flow-match 第 {}/{} 步".format(step, total)
+        elif stage == "start":
+            # start 阶段的 ``total`` 是**总步数**（不是段数）⇒ 让用户
+            # 一开始就知道这一轮要跑多少步。
+            detail = "准备生成（共 {} 步）".format(total)
         elif stage == "vae":
             detail = "VAE 第 {}/{} 段".format(step, total)
         elif stage == "te":
@@ -545,6 +561,14 @@ class MediaGenSession:
             self._error = ""
             self._state = self.STATE_RUNNING
             self._progress.reset()
+            # ⚠️⚠️ **立刻**给一个「启动中」事件（2026-11-04 实测修）。
+            # worker 的第一条 ``qi|`` 进度事件要等它那边真正开始干活
+            # （TE 编码 + 首步）才到，最快也要 1~4 秒 ⇒ 这之前快照里的
+            # ``progress`` 是 ``None`` ⇒ 前端只能把进度条**整个藏起来**
+            # ⇒ 用户点了「生成图片」看着像**什么都没发生**。
+            # 这里先占一个位，让「正在跑」这件事立刻可见。
+            self._progress.update({"stage": "start", "step": 0,
+                                   "total": req.steps, "elapsed_ms": 0.0})
         self._emit()
 
         t = threading.Thread(target=self._run, args=(req,),
