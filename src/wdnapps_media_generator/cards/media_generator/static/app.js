@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  // 文生图卡片前端。
+  // 图片生成卡片前端。
   //
   // 状态有三个来源：
   //   1. GET  /api/media-generator/          —— 首帧 + 兜底轮询
@@ -93,7 +93,7 @@
       if (loading) {
         reason = `模型正在加载（${snap.capability_loading.join(", ")}），首次加载约需 90 秒，请稍候。`;
       } else {
-        reason = "文生图模型未启用，请到「算力配置」页启用 qwenimage21 实例（需要两张 NPU 卡）。";
+        reason = "图片生成模型未启用，请到「算力配置」页启用 qwenimage21 实例（需要两张 NPU 卡）。";
       }
     }
     if (banner && reasonEl) {

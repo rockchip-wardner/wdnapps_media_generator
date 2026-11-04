@@ -1,6 +1,6 @@
 {
   "id": "media-generator",
-  "title": "文生图",
+  "title": "图片生成",
   "category": "image",
   "description": "输入一段文字描述，板端用 Qwen-Image-2.1 生成 512×512 图片。",
   "version": "0.1.0",
@@ -52,6 +52,6 @@
     "compute.registry"
   ],
   "uploads_dir": "uploads/media_generator",
-  "display_order": 35,
+  "display_order": 65,
   "wizard_config": "wizard.json"
 }

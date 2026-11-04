@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "wizard_title": "文生图快速配置",
+  "wizard_title": "图片生成快速配置",
   "swcap_to_model": {
     "swcap_text_to_image": { "npu_index": [0, 1], "model_id": "qwenimage21" }
   },

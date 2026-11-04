@@ -1,4 +1,4 @@
-"""文生图卡片（``media-generator``）。
+"""图片生成卡片（``media-generator``）。
 
 宿主通过 ``manifest.json`` 的 ``backend.module`` 找到本模块，然后：
 

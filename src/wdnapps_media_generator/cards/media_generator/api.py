@@ -1,4 +1,4 @@
-"""文生图接口：REST 控制 + WebSocket 状态推送。
+"""图片生成接口：REST 控制 + WebSocket 状态推送。
 
 挂在 ``/api/media-generator``（由卡片的 ``register_api`` 决定前缀）。
 
@@ -108,11 +108,26 @@ async def media_generator_image(run_id: str):
 # --------------------------------------------------------------------------- #
 @router.websocket("/ws")
 async def media_generator_ws(ws: WebSocket) -> None:
-    """状态变化时推送快照（前端不用一直轮询）。"""
+    """状态变化时推送快照（前端不用一直轮询）。
+
+    ⚠️⚠️ **必须同时「读」一次**，否则 webui 关不干净（2026-11-04 实测）：
+
+    uvicorn 关停时对 WebSocket 只做 ``close(1001)``，**不会**让「只写不读」
+    的协程看到 disconnect —— 它不写就不报错 ⇒ 这个 ASGI 任务永远不结束
+    ⇒ ``Server.shutdown()`` 的 ``gather(server_state.tasks)`` 一直等
+    ⇒ **webui 热重载 / 关停卡死**（表现：日志停在 "Waiting for background
+    tasks to complete"，端口 8000 起不来）。
+
+    ⇒ 这里起一个「只读」的 watcher 协程：客户端断开时它抛
+    ``WebSocketDisconnect`` ⇒ 用 ``FIRST_COMPLETED`` 把它和推送协程赛跑，
+    谁先结束都收尾。
+    """
     await ws.accept()
     sess = get_session()
     last_key = None
-    try:
+
+    async def _push_loop() -> None:
+        nonlocal last_key
         while True:
             snap = sess.snapshot()
             key = (
@@ -129,8 +144,27 @@ async def media_generator_ws(ws: WebSocket) -> None:
                 payload["type"] = "status"
                 await ws.send_json(payload)
             await asyncio.sleep(1.0)
+
+    async def _watch_disconnect() -> None:
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            return
+        except Exception:  # noqa: BLE001
+            return
+
+    push = asyncio.create_task(_push_loop())
+    watch = asyncio.create_task(_watch_disconnect())
+    try:
+        await asyncio.wait({push, watch},
+                           return_when=asyncio.FIRST_COMPLETED)
     except WebSocketDisconnect:
         return
     except Exception:  # noqa: BLE001
         LOG.debug("media_generator ws closed: %s", Path(__file__).name)
         return
+    finally:
+        for t in (push, watch):
+            t.cancel()
+        await asyncio.gather(push, watch, return_exceptions=True)
