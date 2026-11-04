@@ -102,6 +102,20 @@ manifest 需要 `requires_cards: 2`（TE 在卡 0、DiT+VAE 在卡 1）。
 | GET | `/api/media-generator/image/{run_id}` | 取 PNG |
 | WS | `/api/media-generator/ws` | 状态推送 |
 
+## 界面
+
+* **提示词框** + 步数（8 / 20 / 28）+ 「固定噪声」开关。
+* **进度条**：实时显示
+  * 当前阶段与这一步在做什么（`flow-match 第 3/8 步` / `VAE 第 2/4 段`）
+  * **这一步**花了多久、**平均每步**多久、已用多久
+  * **预计还需**多久（ETA = 剩余步数 × 平均每步 + 后续阶段预估值）
+  * 整条流水线的百分比
+* **结果图** + 生成记录（点缩略图回看）。
+
+进度是 worker 通过 DDS delta 通道推过来的**结构化事件**
+（`qi|stage=flow|step=3|total=8|elapsed_ms=2601.5`）⇒ 卡片的
+`service.py` 解析后折成进度条的各个字段。
+
 ## 已知边界
 
 * **停止打不断正在跑的那次**：出图是一次 NPU 调用（C 侧不可中断），

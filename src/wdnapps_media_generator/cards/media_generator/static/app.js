@@ -68,6 +68,53 @@
   }
 
   // ------------------------------------------------------------------ //
+  // 进度条
+  // ------------------------------------------------------------------ //
+  // worker 通过 DDS delta 通道把**结构化进度**推过来（后端 service.py
+  // 解析后放进快照的 progress 字段）：
+  //   stage      —— 当前阶段（生成图像 / 解码图像 / …）
+  //   detail     —— 这一步具体在做什么（flow-match 第 3/8 步）
+  //   step_ms    —— **这一步**花了多久
+  //   step_avg_ms—— 本阶段平均每步
+  //   eta        —— 预计还需多久
+  //   percent    —— 整条流水线的百分比
+  function fmtDur(sec) {
+    if (sec === null || sec === undefined) return "--";
+    const s = Math.max(0, Math.round(sec));
+    if (s < 60) return `${s} 秒`;
+    const m = Math.floor(s / 60);
+    return `${m} 分 ${String(s % 60).padStart(2, "0")} 秒`;
+  }
+
+  function renderProgress(prog) {
+    const box = $("mg-progress");
+    if (!box) return;
+    if (!prog) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    setText($("mg-progress-stage"), prog.stage_label || prog.stage || "--");
+    setText($("mg-progress-detail"), prog.detail || "--");
+    const pct = Math.max(0, Math.min(100, Number(prog.percent) || 0));
+    setText($("mg-progress-pct"), `${Math.round(pct)}%`);
+    const fill = $("mg-progress-fill");
+    if (fill) fill.style.width = `${pct}%`;
+
+    const stepMs = Number(prog.step_ms) || 0;
+    const avgMs = Number(prog.step_avg_ms) || 0;
+    const stepTxt = [];
+    if (stepMs > 0) stepTxt.push(`这一步 ${fmtDur(stepMs / 1000)}`);
+    if (avgMs > 0 && prog.total > 1) stepTxt.push(`平均每步 ${fmtDur(avgMs / 1000)}`);
+    if (prog.elapsed) stepTxt.push(`已用 ${fmtDur(prog.elapsed)}`);
+    setText($("mg-progress-step"), stepTxt.join(" · ") || "--");
+
+    const eta = Number(prog.eta);
+    setText($("mg-progress-eta"),
+            eta > 0 ? `预计还需 ${fmtDur(eta)}` : "即将完成");
+  }
+
+  // ------------------------------------------------------------------ //
   // 快照渲染
   // ------------------------------------------------------------------ //
   function renderSnapshot(snap) {
@@ -143,6 +190,10 @@
         raw.textContent = String(snap);
       }
     }
+
+    // 进度条：跑的时候实时跳；跑完了**留住最后一条**（让人看清
+    // 「最后一步花了多久 / 一共用了多久」），下一次生成再重置。
+    renderProgress(snap.progress || null);
 
     // DemoGuard：告诉宿主「本应用现在有没有在跑后台任务」。
     if (window.DemoGuard && typeof window.DemoGuard.report === "function") {

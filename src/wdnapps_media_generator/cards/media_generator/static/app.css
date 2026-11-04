@@ -106,6 +106,68 @@
   line-height: 1.4;
 }
 
+/* ---- 进度条 ---- */
+.mg-progress {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.mg-progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.mg-progress-stage {
+  font-weight: 600;
+  color: #111827;
+}
+
+.mg-progress-detail {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.mg-progress-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.mg-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.mg-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width 0.4s ease;
+}
+
+.mg-progress-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.mg-spacer {
+  flex: 1 1 auto;
+}
+
 /* ---- 结果区 ---- */
 .mg-result {
   background: #fff;

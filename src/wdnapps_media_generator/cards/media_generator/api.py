@@ -35,6 +35,15 @@ from wdnapps_media_generator.cards.media_generator.service import (
 
 LOG = logging.getLogger("apps.media_generator")
 
+#: 单次 WS 推送的超时（秒）。超过就认为这条连接已经死了 —— 见
+#: ``media_generator_ws`` 里那段关于 CLOSE-WAIT 的说明。
+_WS_SEND_TIMEOUT = 5.0
+
+#: 心跳：每 N 秒**无条件**推一次（即使状态没变）。
+#: 作用是「让死掉的连接有机会被发现」—— 只在状态变化时推的话，
+#: 一条已经死掉但没关闭的连接永远等不到 send ⇒ 永远发现不了它死了。
+_WS_HEARTBEAT = 10
+
 router = APIRouter(tags=["media-generator"])
 
 
@@ -128,8 +137,10 @@ async def media_generator_ws(ws: WebSocket) -> None:
 
     async def _push_loop() -> None:
         nonlocal last_key
+        tick = 0
         while True:
             snap = sess.snapshot()
+            prog = snap.get("progress") or {}
             key = (
                 snap["state"],
                 snap.get("error") or "",
@@ -137,12 +148,34 @@ async def media_generator_ws(ws: WebSocket) -> None:
                 tuple(snap.get("capability_loading") or ()),
                 snap.get("history_count"),
                 (snap.get("last") or {}).get("run_id"),
+                # 进度：阶段 + 步序变了就推（前端据此画进度条）
+                prog.get("stage"),
+                prog.get("step"),
             )
-            if key != last_key:
+            tick += 1
+            # 每 _WS_HEARTBEAT 秒**无条件**推一次（心跳）：
+            #   只在「状态变化时」推的话，一条已经死掉但没关闭的连接
+            #   永远等不到一次 send ⇒ 也就永远发现不了它死了 ⇒ 关停挂死。
+            if key != last_key or tick % _WS_HEARTBEAT == 0:
                 last_key = key
                 payload = dict(snap)
                 payload["type"] = "status"
-                await ws.send_json(payload)
+                # ⚠️⚠️ **必须给 send 加超时**（2026-11-04 实测踩到）：
+                #   对端「消失但不干净关闭」时（浏览器标签被杀 / 网断 /
+                #   进程被 kill），socket 会停在 CLOSE-WAIT 且**还有数据没发出去**
+                #   ⇒ uvicorn 的 ``await self.send(data)`` 一直等写缓冲排空
+                #   ⇒ 这个协程**永远不返回** ⇒ uvicorn 关停时
+                #   ``server_state.tasks`` 一直非空 ⇒ 整个 webui 的
+                #   热重载 / 关停**卡死**（日志停在 "Waiting for background
+                #   tasks to complete"，端口起不来）。
+                #   ⇒ 超时即视为「连接已死」⇒ 主动收尾。
+                try:
+                    await asyncio.wait_for(
+                        ws.send_json(payload), timeout=_WS_SEND_TIMEOUT)
+                except (asyncio.TimeoutError, WebSocketDisconnect):
+                    return
+                except Exception:  # noqa: BLE001
+                    return
             await asyncio.sleep(1.0)
 
     async def _watch_disconnect() -> None:

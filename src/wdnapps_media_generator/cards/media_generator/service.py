@@ -47,6 +47,199 @@ MAX_HISTORY = 50
 
 
 # --------------------------------------------------------------------------- #
+# 进度
+# --------------------------------------------------------------------------- #
+#: worker 通过 DDS delta 通道推过来的**结构化**进度消息前缀
+#: （wdnai 的 image backend 把 cshim 的回调转成这种格式，见
+#: ``wdnai/backends/image.py::_on_cshim_progress``）。
+PROGRESS_PREFIX = "qi|"
+
+#: 阶段 → 中文标签（前端直接显示）
+STAGE_LABELS = {
+    "init":     "加载模型",
+    "te":       "编码提示词",
+    "flow":     "生成图像",
+    "vae_init": "加载解码器",
+    "vae":      "解码图像",
+    "release":  "释放采样器",
+    "save":     "保存图片",
+    "done":     "完成",
+}
+
+#: 各阶段在**整条流水线**里的大致占比（用来算总进度百分比）。
+#: 实测（8 步）：te 0.2 s / flow 21 s / vae 10 s ⇒ flow 占大头。
+STAGE_WEIGHTS = {
+    "te": 0.02, "flow": 0.80, "vae": 0.15,
+    "vae_init": 0.01, "release": 0.01, "save": 0.01,
+}
+
+#: 流水线顺序（用于「还剩哪些阶段」）
+STAGE_ORDER = ("te", "flow", "vae", "save")
+
+#: 还没进入的阶段的**固定预估秒数**（板端实测值）。
+#: ETA = 当前阶段的剩余时间 + 后面这些阶段的预估值。
+STAGE_ETA_SECONDS = {
+    "te": 0.3, "flow": 0.0, "vae": 10.0, "save": 0.3,
+    "vae_init": 2.0, "release": 0.5,
+}
+
+
+def parse_progress(msg: str) -> Optional[dict]:
+    """解析 worker 推来的进度消息；不是进度消息就返回 None。
+
+    消息格式（见 :data:`PROGRESS_PREFIX`）::
+
+        qi|stage=flow|step=3|total=8|elapsed_ms=2601.5
+    """
+    if not msg or not msg.startswith(PROGRESS_PREFIX):
+        return None
+    out: Dict[str, Any] = {}
+    for part in msg[len(PROGRESS_PREFIX):].split("|"):
+        if "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        out[k.strip()] = v.strip()
+    stage = out.get("stage")
+    # ⚠️ 「step」必须**存在**（不是「能解析成数字」）—— 缺了说明这条消息
+    # 不是一个完整的进度事件（多半是别的东西误打进来的）⇒ 丢掉。
+    if not stage or "step" not in out:
+        return None
+    try:
+        step = int(out.get("step", "0"))
+        total = int(out.get("total", "0"))
+        elapsed_ms = float(out.get("elapsed_ms", "0"))
+    except (TypeError, ValueError):
+        return None
+    return {"stage": stage, "step": step, "total": total,
+            "elapsed_ms": elapsed_ms}
+
+
+class ProgressTracker:
+    """把一串进度事件折成「进度条 + 每步耗时 + 还需多久」。
+
+    输入是 worker 的结构化事件；输出是给前端的一个 dict：
+
+    ==================  ====================================================
+    字段                 含义
+    ==================  ====================================================
+    ``stage``           当前阶段（init/te/flow/vae/…）
+    ``stage_label``     阶段中文名
+    ``step`` / ``total`` 该阶段内的步序 / 总步数
+    ``percent``         整条流水线的百分比（0~100）
+    ``elapsed``         本次生成已用（秒）
+    ``step_ms``         **刚这一步**用了多久（毫秒）
+    ``step_avg_ms``     本阶段的平均每步（毫秒）
+    ``eta``             **预计还需**多久（秒）
+    ``detail``          一句话人话（「flow-match 第 3/8 步」）
+    ==================  ====================================================
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._lock = threading.Lock()
+        self.stage = ""
+        self.step = 0
+        self.total = 0
+        self.step_ms = 0.0
+        self._durations: List[float] = []
+        self._stage_done: Dict[str, float] = {}   # 已完成阶段的耗时
+        self._t0 = time.perf_counter()
+        self._last: Optional[dict] = None
+
+    def update(self, ev: dict) -> None:
+        """吃进一个进度事件。"""
+        with self._lock:
+            stage = ev["stage"]
+            if stage != self.stage:
+                # 换阶段了 ⇒ 上一个阶段收尾，把它的耗时记下来
+                if self.stage:
+                    self._stage_done[self.stage] = sum(self._durations)
+                self.stage = stage
+                self._durations = []
+                self.step = 0
+                self.total = ev.get("total", 0)
+            self.step = ev.get("step", 0)
+            self.total = ev.get("total", self.total)
+            ms = float(ev.get("elapsed_ms", 0.0))
+            self.step_ms = ms
+            if ms > 0:
+                self._durations.append(ms)
+            self._last = ev
+
+    # -- 输出 ------------------------------------------------------------ #
+    def snapshot(self) -> Optional[dict]:
+        with self._lock:
+            if not self.stage:
+                return None
+            stage = self.stage
+            step = self.step
+            total = self.total
+            step_ms = self.step_ms
+            durations = list(self._durations)
+            done = dict(self._stage_done)
+            t0 = self._t0
+
+        elapsed = time.perf_counter() - t0
+        avg = (sum(durations) / len(durations)) if durations else 0.0
+
+        # ---- 百分比 ----
+        percent = 0.0
+        for st, w in STAGE_WEIGHTS.items():
+            if st in done:
+                percent += w
+            elif st == stage:
+                frac = (step / total) if total else 0.0
+                percent += w * max(0.0, min(1.0, frac))
+        percent = max(0.0, min(100.0, percent * 100.0))
+
+        # ---- 还需多久 ----
+        eta = 0.0
+        if stage in ("flow", "vae") and total and avg > 0:
+            eta += avg * max(0, total - step) / 1000.0
+        elif stage == "flow" and total:
+            # 一个步长都还没完成 ⇒ 用板端实测的均值兜底
+            eta += 2.6 * max(0, total - step)
+        # 后面还没开始的阶段
+        try:
+            idx = STAGE_ORDER.index(stage)
+            rest = STAGE_ORDER[idx + 1:]
+        except ValueError:
+            rest = ()
+        for st in rest:
+            eta += STAGE_ETA_SECONDS.get(st, 0.0)
+        if stage in ("vae_init", "release"):
+            eta += STAGE_ETA_SECONDS.get(stage, 0.0)
+
+        # ---- 人话 ----
+        label = STAGE_LABELS.get(stage, stage)
+        if stage == "flow":
+            detail = "flow-match 第 {}/{} 步".format(step, total)
+        elif stage == "vae":
+            detail = "VAE 第 {}/{} 段".format(step, total)
+        elif stage == "te":
+            detail = "文本编码 第 {}/{} 张".format(step, total)
+        elif total > 1:
+            detail = "{} {}/{}".format(label, step, total)
+        else:
+            detail = label
+
+        return {
+            "stage": stage,
+            "stage_label": label,
+            "step": step,
+            "total": total,
+            "percent": round(percent, 1),
+            "elapsed": round(elapsed, 2),
+            "step_ms": round(step_ms, 1),
+            "step_avg_ms": round(avg, 1),
+            "eta": round(max(0.0, eta), 1),
+            "detail": detail,
+        }
+
+
+# --------------------------------------------------------------------------- #
 # 输出目录
 # --------------------------------------------------------------------------- #
 def output_root() -> Path:
@@ -190,6 +383,7 @@ class MediaGenSession:
         self._cancel = False
         self._thread: Optional[threading.Thread] = None
         self._broadcaster: Optional[Callable[[dict], None]] = None
+        self._progress = ProgressTracker()
 
     # -- 能力探测 ------------------------------------------------------- #
     @staticmethod
@@ -237,6 +431,7 @@ class MediaGenSession:
                 "last":        self._last_run,
                 "history_count": len(self._history),
                 "output_root": str(output_root()),
+                "progress":    self._progress.snapshot(),
             }
 
     def history(self) -> List[dict]:
@@ -288,6 +483,7 @@ class MediaGenSession:
             self._elapsed = 0.0
             self._error = ""
             self._state = self.STATE_RUNNING
+            self._progress.reset()
         self._emit()
 
         t = threading.Thread(target=self._run, args=(req,),
@@ -356,6 +552,20 @@ class MediaGenSession:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _on_delta(self, msg: str) -> None:
+        """worker 推来的增量消息（DDS delta 通道）。
+
+        ⚠️ 这个回调跑在 **DDS 的读线程**上，不是事件循环线程 ⇒
+        只做「改状态」这一件事：**不**在这里调 ``_emit()``（那会从
+        非事件循环线程去碰 registry）。前端靠 WS 的 1 秒节拍把进度取走。
+
+        消息里只有 ``qi|`` 开头的才是进度消息，其余（人类可读的日志行）忽略。
+        """
+        ev = parse_progress(msg)
+        if ev is None:
+            return
+        self._progress.update(ev)
+
     def _generate(self, req: ImageRequest) -> Path:
         """把提示词送到 worker，等回一张图，落盘。
 
@@ -374,6 +584,7 @@ class MediaGenSession:
 
         text, attachments = asyncio.run(sess.run_prompt(
             req.prompt,
+            on_delta=self._on_delta,
             output_dir=str(target),
             steps=req.steps,
             noise_fresh=(not req.fixed_noise),
