@@ -4,7 +4,7 @@
   "category": "image",
   "description": "输入一段文字描述，板端用 Qwen-Image-2.1 生成 512×512 图片。",
   "version": "0.1.0",
-  "preview_video": "",
+  "preview_video": "/static/apps/media-generator/preview.mp4",
   "preview_image": "",
   "software_capabilities": [
     "swcap_text_to_image"
