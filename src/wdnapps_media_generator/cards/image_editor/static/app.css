@@ -1,0 +1,368 @@
+/* 文生图卡片（image-editor）私有样式。
+ *
+ * 只用 ie-* 前缀的类名 —— 通用类（.vd-btn / .vd-section / .page-header …）
+ * 来自宿主 app/static/core/framework.css，不要在这里重定义。
+ */
+
+.ie-stage {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.ie-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  min-height: 84px;
+  background: #fbfbfd;
+  color: inherit;
+}
+
+.ie-prompt:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.ie-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ie-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ie-field-check {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ie-label {
+  white-space: nowrap;
+}
+
+.ie-select {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+}
+
+.ie-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 16px;
+}
+
+.ie-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+/* ---- 不可用横幅 ---- */
+.ie-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.ie-banner-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.ie-banner-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+/* ---- 进度条 ---- */
+.ie-progress {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.ie-progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.ie-progress-stage {
+  font-weight: 600;
+  color: #111827;
+}
+
+.ie-progress-detail {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.ie-progress-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.ie-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.ie-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width 0.4s ease;
+}
+
+.ie-progress-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.ie-spacer {
+  flex: 1 1 auto;
+}
+
+/* ---- 结果区 ---- */
+.ie-result {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  min-height: 120px;
+}
+
+.ie-result-empty {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}
+
+.ie-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.ie-image {
+  max-width: 100%;
+  /* 512×512 原图；别放大失真，也别缩到看不清 */
+  width: 512px;
+  max-width: 100%;
+  image-rendering: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #f3f4f6;
+  display: block;
+}
+
+.ie-caption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 512px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ie-download {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ie-download:hover {
+  text-decoration: underline;
+}
+
+/* ---- 历史缩略图 ---- */
+.ie-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: #f3f4f6;
+}
+
+.ie-thumb:hover {
+  border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * ⭐ 输入图（上传区）—— 图生图卡片的必填项
+ * ------------------------------------------------------------------ */
+.ie-source {
+  margin-bottom: 12px;
+}
+
+.ie-source-drop {
+  position: relative;
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  background: #fbfbfd;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.ie-source-drop:hover {
+  border-color: var(--accent);
+  background: #f7f9ff;
+}
+.ie-source-drop.is-drag {
+  border-color: var(--accent);
+  border-style: solid;
+  background: #eef3ff;
+}
+.ie-source-drop.is-error {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.ie-source-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ie-source-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 8px;
+  text-align: center;
+}
+.ie-source-icon {
+  /* ⚠️ 板端**没有 emoji 字体**（🖼 会渲染成豆腐块 □），所以用内联 SVG */
+  width: 30px;
+  height: 30px;
+  display: block;
+  color: var(--muted);
+}
+.ie-source-text {
+  font-size: 13px;
+  color: var(--text, #374151);
+}
+.ie-source-note {
+  font-size: 11px;
+  opacity: .65;
+}
+
+.ie-source-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ie-source-img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #f3f4f6;
+}
+.ie-source-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  opacity: .8;
+  min-width: 0;
+}
+.ie-source-info > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.ie-source-clear {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: inherit;
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ie-source-clear:hover {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+/* ------------------------------------------------------------------ *
+ * ⭐ 处理记录条目：缩略图在左、正文在右
+ *
+ * ⚠️ 宿主 framework.css 里的 `.vd-event-body` 是 `display:flex`（**行**
+ *    方向），而 `.vd-event-text` / `.vd-event-meta` 是两个 div ——
+ *    直接塞进去会被排成**同一行**，提示词后面粘着时间戳
+ *    （「...放在热带海滩上02:29:29 · 8 步」）。
+ *    `.vd-event-body` 全站只有这两张图片卡在用，但这里仍然**按 page id
+ *    限定作用域**改，不去动宿主的共享类。
+ * ------------------------------------------------------------------ */
+#page-image-editor .vd-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+#page-image-editor .vd-event-body {
+  flex-direction: column;
+  min-width: 0;
+}

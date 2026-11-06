@@ -47,6 +47,8 @@ image = ["numpy>=1.21"]
 # ---------------------------------------------------------------------------
 [project.entry-points."wdnwebui.cards"]
 "media-generator" = "wdnapps_media_generator.cards.media_generator"
+# ⭐ 图生图卡（同一个模型 Qwen-Image-2.1，输入图 + 文本 → 输出图）
+"image-editor" = "wdnapps_media_generator.cards.image_editor"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -58,3 +60,4 @@ exclude = ["tests*"]
 # 但前端 404 —— 这正是插件化最容易踩且最难一眼看出的坑）。
 [tool.setuptools.package-data]
 "wdnapps_media_generator.cards.media_generator" = ["manifest.json", "static/*"]
+"wdnapps_media_generator.cards.image_editor" = ["manifest.json", "static/*"]

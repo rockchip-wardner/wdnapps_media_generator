@@ -1,0 +1,57 @@
+{
+  "id": "image-editor",
+  "title": "图片处理",
+  "category": "image",
+  "description": "上传一张图片 + 一句描述，板端用 Qwen-Image-2.1 在原图基础上生成新图。",
+  "version": "0.1.0",
+  "preview_video": "/static/apps/image-editor/preview.mp4",
+  "preview_image": "",
+  "software_capabilities": [
+    "swcap_text_to_image"
+  ],
+  "hardware_capabilities": [],
+  "backend": {
+    "module": "wdnapps_media_generator.cards.image_editor",
+    "register_api": "register_api",
+    "register_shutdown": "register_shutdown"
+  },
+  "frontend": {
+    "template": "/static/apps/image-editor/template.html",
+    "js": [
+      "/static/apps/image-editor/app.js"
+    ],
+    "css": [
+      "/static/apps/image-editor/app.css"
+    ]
+  },
+  "demo_guard": {
+    "active_state_keys": [
+      "session.busy",
+      "session.running",
+      "session.state"
+    ],
+    "stop_endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/image-editor/stop"
+      }
+    ],
+    "stop_sync_endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/image-editor/stop"
+      }
+    ]
+  },
+  "prompts": {
+    "schema_class": "",
+    "editable_fields": [],
+    "prompt_template": ""
+  },
+  "requires_core": [
+    "compute.registry"
+  ],
+  "uploads_dir": "uploads/image_editor",
+  "display_order": 66,
+  "wizard_config": "wizard.json"
+}

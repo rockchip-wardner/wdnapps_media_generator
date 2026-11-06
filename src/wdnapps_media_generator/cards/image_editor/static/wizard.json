@@ -1,0 +1,50 @@
+{
+  "enabled": true,
+  "wizard_title": "图片处理快速配置",
+  "swcap_to_model": {
+    "swcap_text_to_image": { "npu_index": [0, 1], "model_id": "qwenimage21" }
+  },
+  "open_source_button": "",
+  "steps": [
+    { "id": "env",  "title": "运行环境检查", "kind": "env_check" },
+    { "id": "text", "title": "原图与改法",     "kind": "form",
+      "fields": [
+        { "id": "image-editor-original", "ui_key": "original",
+          "type": "image",
+          "label": "要处理的原图",
+          "summary_label": "原图",
+          "placeholder": "点击选择图片，或把图片拖到这里",
+          "required": true,
+          "transient": true,
+          "accept": "image/png,image/jpeg,image/webp",
+          "max_bytes": 12582912 },
+        { "id": "image-editor-prompt", "ui_key": "prompt",
+          "label": "例:把背景换成夕阳下的海滩，人物保持不变。",
+          "summary_label": "改法描述", "type": "textarea" },
+        { "id": "image-editor-strength", "ui_key": "strength",
+          "label": "保留原图的程度（越大越接近重新生成）",
+          "summary_label": "保留原图", "type": "select",
+          "options": [
+            { "value": "0.35", "label": "35%（几乎不改）" },
+            { "value": "0.55", "label": "55%（轻微调整）" },
+            { "value": "0.75", "label": "75%（推荐）", "selected": true },
+            { "value": "0.9",  "label": "90%（大幅重绘）" }
+          ]
+        },
+        { "id": "image-editor-steps", "ui_key": "steps",
+          "label": "步数", "summary_label": "步数", "type": "select",
+          "options": [
+            { "value": "8",  "label": "8 步（快，约 35 秒）", "selected": true },
+            { "value": "20", "label": "20 步（约 70 秒）" },
+            { "value": "28", "label": "28 步（约 95 秒）" },
+            { "value": "40", "label": "40 步（官方推荐，约 130 秒）" }
+          ]
+        },
+        { "id": "image-editor-fixed-noise", "ui_key": "fixedNoise",
+          "label": "固定噪声（同一个提示词每次出同一张图）",
+          "summary_label": "固定噪声", "type": "checkbox" }
+      ]
+    },
+    { "id": "finish", "title": "完成配置", "kind": "finish" }
+  ]
+}

@@ -1,0 +1,137 @@
+      <section id="page-image-editor" class="page hidden" data-page="image-editor">
+        <header class="page-header">
+          <h2>图片处理</h2>
+          <div class="header-meta">
+            <span class="collected-at" id="ie-status-line">--</span>
+            <button class="wizard-mode-btn" data-wizard-mode data-page-id="image-editor">向导模式</button>
+          </div>
+        </header>
+
+        <div id="ie-unavailable" class="ie-banner ie-banner-error hidden">
+          <span class="ie-banner-icon" aria-hidden="true">
+            <!-- ⚠️ 板端**没有 emoji / 符号字体**（⚠ 会渲染成豆腐块 □）⇒ 用内联 SVG -->
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                 stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3.6L1.9 20.4h20.2L12 3.6z" />
+              <path d="M12 9.6v4.6" />
+              <circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <span class="ie-banner-text">
+            图片处理不可用：<span id="ie-unavailable-reason">--</span>
+          </span>
+        </div>
+
+        <div class="ie-stage">
+          <!-- ============ ⭐ 输入图（必填）============ -->
+          <div class="ie-source" id="ie-source-box">
+            <div class="ie-source-drop" id="ie-source-drop" tabindex="0"
+                 role="button" aria-label="选择或拖入要处理的图片">
+              <input type="file" id="ie-source-file" accept="image/png,image/jpeg,image/webp"
+                     class="ie-source-input" />
+              <div class="ie-source-empty" id="ie-source-empty">
+                <svg class="ie-source-icon" viewBox="0 0 24 24" aria-hidden="true"
+                     fill="none" stroke="currentColor" stroke-width="1.6"
+                     stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                  <circle cx="8.6" cy="9.6" r="1.6" />
+                  <path d="M3.6 17.6l4.7-4.6a2 2 0 0 1 2.7 0l3.1 3 1.6-1.5a2 2 0 0 1 2.7 0l2.4 2.3" />
+                </svg>
+                <span class="ie-source-text">点击选择图片，或把图片拖到这里</span>
+                <span class="ie-source-note">PNG / JPEG / WebP · 会自动缩放到 512×512</span>
+              </div>
+              <div class="ie-source-preview hidden" id="ie-source-preview-wrap">
+                <img id="ie-source-preview" class="ie-source-img" alt="要处理的原图" />
+                <div class="ie-source-info">
+                  <span id="ie-source-name">--</span>
+                  <button type="button" class="ie-source-clear" id="ie-source-clear"
+                          title="换一张">×</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <textarea id="ie-prompt" class="ie-prompt" rows="3"
+                    placeholder="描述你想怎么改这张图，例如：把背景换成夕阳下的海滩，人物保持不变"></textarea>
+
+          <div class="ie-controls">
+            <label class="ie-field">
+              <span class="ie-label">保留原图</span>
+              <select id="ie-strength" class="ie-select"
+                      title="越大越接近重新生成，越小越贴近原图">
+                <option value="0.35">35%（几乎不改）</option>
+                <option value="0.55">55%（轻微调整）</option>
+                <option value="0.75" selected>75%（推荐）</option>
+                <option value="0.9">90%（大幅重绘）</option>
+              </select>
+            </label>
+            <label class="ie-field">
+              <span class="ie-label">步数</span>
+              <select id="ie-steps" class="ie-select">
+                <option value="8" selected>8 步（快，约 35 秒）</option>
+                <option value="20">20 步（约 70 秒）</option>
+                <option value="28">28 步（约 95 秒）</option>
+                <option value="40">40 步（官方推荐，约 130 秒）</option>
+              </select>
+            </label>
+            <label class="ie-field ie-field-check" title="固定初始噪声：同一个提示词每次出同一张图，方便对拍">
+              <input type="checkbox" id="ie-fixed-noise" />
+              <span class="ie-label">固定噪声</span>
+            </label>
+            <span class="vd-spacer"></span>
+            <button id="ie-generate" class="vd-btn vd-btn-primary">生成图片</button>
+            <button id="ie-stop" class="vd-btn" disabled>停止</button>
+          </div>
+
+          <div class="ie-hint" id="ie-hint"></div>
+          <div class="ie-meta" id="ie-meta">未开始</div>
+
+          <div class="ie-progress hidden" id="ie-progress">
+            <div class="ie-progress-head">
+              <span class="ie-progress-stage" id="ie-progress-stage">--</span>
+              <span class="ie-progress-detail" id="ie-progress-detail">--</span>
+              <span class="ie-spacer"></span>
+              <span class="ie-progress-pct" id="ie-progress-pct">0%</span>
+            </div>
+            <div class="ie-progress-bar">
+              <div class="ie-progress-fill" id="ie-progress-fill"></div>
+            </div>
+            <div class="ie-progress-foot">
+              <span id="ie-progress-step">--</span>
+              <span class="ie-spacer"></span>
+              <span id="ie-progress-eta">--</span>
+            </div>
+          </div>
+        </div>
+
+        <section class="ie-result" id="ie-result">
+          <div class="ie-result-empty" id="ie-result-empty">
+            还没有处理结果。上传一张图，写一句怎么改，点「生成图片」。
+          </div>
+          <figure class="ie-figure hidden" id="ie-figure">
+            <img id="ie-image" class="ie-image" alt="处理后的图片" />
+            <figcaption class="ie-caption">
+              <span id="ie-caption-text">--</span>
+              <span class="vd-spacer"></span>
+              <a id="ie-download" class="ie-download" download="image.png">下载 PNG</a>
+            </figcaption>
+          </figure>
+        </section>
+
+        <section class="vd-section">
+          <header class="vd-section-head">
+            <h3>处理记录</h3>
+            <span class="vd-spacer"></span>
+            <span class="vd-meta" id="ie-history-count">0 张</span>
+          </header>
+          <ol class="vd-event-list" id="ie-history-list">
+            <li class="vd-event-empty">尚无处理记录，处理后结果显示在这里。</li>
+          </ol>
+        </section>
+
+        <details class="raw-output">
+          <summary>完整 JSON</summary>
+          <pre class="payload" id="data-image-editor"></pre>
+        </details>
+      </section>
