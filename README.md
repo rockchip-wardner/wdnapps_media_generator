@@ -9,14 +9,61 @@ wdnwebui 的**媒体生成类**应用插件。当前提供一张卡：**图片�
 
 ## 卡片
 
+本仓库有**两张卡**，同一个模型（`qwenimage21` = Qwen-Image-2.1）：
+
+| | `media-generator` | `image-editor` |
+|---|---|---|
+| 显示名 | **图片生成** | **图片处理** |
+| 输入 | 一段文字 | **一张图 + 一段文字** |
+| 输出 | 512×512 PNG | 512×512 PNG |
+| 能力 | `swcap_text_to_image` | `swcap_text_to_image`（**同一个**） |
+| 路由前缀 | `/api/media-generator` | `/api/image-editor` |
+| 额外参数 | — | `image`（base64）、`strength`（0~1） |
+
+`image-editor` 排在应用网格里 `media-generator` 的**后面**（`display_order`
+66 vs 65），代码在同一个仓、同一个 `cards/` 目录下。
+
+### `image-editor` 的额外依赖：VAE **编码器**
+
+「图 + 文 → 图」比文生图多一步：**输入图要先变成潜变量**。
+
+板端模型包 `Qwen-Image-2.1/` 里原本只有 VAE **解码器**
+（`vae_qwenimage21-512.3588.rknn`：输入 `latents` → 输出 `image`），
+**没有编码器** ⇒ 图进不了潜空间 ⇒ 图生图做不了。
+
+现在补上了 **`vae_qwenimage21-512.encoder.3588.rknn`**（205 MB，rknn2 /
+rk3588 / fp16）：输入 `pixel_values` `[1,4,1,512,512]`（RGBA，[-1,1]）→
+输出 `latents` `[1,64,1,32,32]`。它和解码器**同在本机 3588 的 NPU** 上，
+实测**能同时常驻**（解码器 2311 MiB + 编码器 ≈ 0.9 GiB < 4 GiB 池）。
+
+> ⚠️ 模型包里**没有**编码器时，图生图会**明确报错**
+> （「本机不支持图生图」），**不会**偷偷退化成文生图。
+> 文生图完全不受影响（编码器是可选件）。
+
+### 向导里的**拖拽上传**（`type: "image"`）
+
+`image-editor` 的向导第 2 步「原图与改法」带一个**拖拽上传区**：
+把图拖进去（或点一下选文件）⇒ 出预览 + 文件名 ⇒ 「下一步」变亮 ⇒
+「完成配置」后**自动开跑**（向导页看不到卡片进度条，卡片会提示去哪看）。
+
+用的是宿主向导新加的 **`"type": "image"`** 字段
+（`app/static/core/wizard/state.js::_buildImageField`）：
+
 | 项 | 值 |
 |---|---|
-| 卡片 id | `media-generator` |
-| 显示名 | **图片生成** |
-| 能力 | `swcap_text_to_image` |
-| 出图入口 | 输入一段文字 → 生成 → 展示 PNG |
-| 模型 | `qwenimage21`（算力注册中心启用的 worker 进程） |
-| 耗时 | worker 首次 load ≈ 90 s；每张图 8 步 ≈ 33 s / 20 步 ≈ 103 s / 28 步 ≈ 124 s |
+| 字段值 | **data URL**（`data:image/png;base64,…`） |
+| 落盘 | **不落 localStorage**（字段声明 `"transient": true`） |
+| 回填 | `applyWizardSnapshot(opts)` 里剥前缀拿裸 base64 |
+
+⚠️ **为什么值是 data URL 而不是路径**：向导原有的「文件字段」那套
+（`browse` / `upload`）存的是**服务端路径**，要用 `upload_endpoint` +
+`thumbnail_endpoint` 两个后端端点。图片是**浏览器本地文件**，走那条路
+要多两个端点；而 data URL 直接能当 `<img src>` 预览、剥前缀就是本卡
+`/generate` 收的 base64 ⇒ 卡片侧几乎零改动。
+
+⚠️ **base64 不能落 localStorage**：一张图几百 KB~几 MB，
+`localStorage.setItem` 是**整体覆盖** ⇒ 配额爆了会把**其它字段**
+（提示词、步数…）一起弄丢。宿主侧用 `"transient": true` 标记 + 落盘前剔除。
 
 ## 架构：图是在**别的进程**里出的
 
@@ -75,16 +122,23 @@ editable 装法看不出来（源码就在那儿），只有真 wheel 才暴露�
 worker 的 manifest 放在**模型文件夹**里（一个文件夹 = 一个安装单元）：
 
 ```
-/mnt/oem/models/qwenimage21/qwenimage21.json     ← manifest
-/mnt/oem/models/qwenimage21/...                   ← 模型文件
+/mnt/oem/models/Qwen-Image-2.1/qwenimage21.json     ← manifest
+/mnt/oem/models/Qwen-Image-2.1/...                   ← 模型文件
 ```
 
 板上 `/mnt/oem` 只有 558 MB 空闲（放不下 9.4 GB 的模型），所以本板用
 **软链**把模型包挂进来：
 
 ```bash
-ln -s /home/rockchip/models/qwenimage21 /mnt/oem/models/qwenimage21
+ln -s /home/rockchip/models/Qwen-Image-2.1 /mnt/oem/models/Qwen-Image-2.1
 ```
+
+⚠️ **模型目录名 = HF 仓库名**（`Qwen/Qwen-Image-2.1` ⇒ `Qwen-Image-2.1`），
+与 `/mnt/oem/models/` 下其它包（`Qwen3-VL-4B` / `Qwen3-TTS` /
+`LocateAnything-3B`）同规则；而 **manifest 的文件名 = model_id**
+（`qwenimage21.json`）⇒ 它同时是 worker 的 `--model` 参数与 `/proc` 去重
+needle，**改目录名不要改它**。改名后同步 manifest 的 `model_dir_name` 即可
+（发现规则是「manifest 所在目录 = 模型目录」，代码不依赖目录名）。
 
 manifest 里 `model_dir_env = WDNAI_QWEN_IMAGE_21_DIR` —— worker 启动时
 会把它指到 manifest 所在目录，wdnai 认这个环境变量。
