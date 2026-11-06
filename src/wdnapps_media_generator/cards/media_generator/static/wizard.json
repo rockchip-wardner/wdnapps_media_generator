@@ -16,8 +16,9 @@
           "label": "步数", "summary_label": "步数", "type": "select",
           "options": [
             { "value": "8",  "label": "8 步（快，约 35 秒）", "selected": true },
-            { "value": "20", "label": "20 步（推荐，约 100 秒）" },
-            { "value": "28", "label": "28 步（精细，约 125 秒）" }
+            { "value": "20", "label": "20 步（约 70 秒）" },
+            { "value": "28", "label": "28 步（约 95 秒）" },
+            { "value": "40", "label": "40 步（官方推荐，约 130 秒）" }
           ]
         },
         { "id": "media-generator-fixed-noise", "ui_key": "fixedNoise",

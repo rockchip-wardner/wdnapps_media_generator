@@ -9,7 +9,7 @@
 * ``GET  /api/media-generator/image/{id}``   — 取某次生成的 PNG
 * ``WS   /api/media-generator/ws``           — 状态变化时推送快照
 
-⚠️ 出图是**重**操作（8 步 ≈ 35 s，20 步 ≈ 100 s，28 步 ≈ 125 s，首次还要等
+⚠️ 出图是**重**操作（8 步 ≈ 35 s，20 步 ≈ 70 s，28 步 ≈ 95 s，40 步 ≈ 130 s，首次还要等
 worker 把模型 load 进来 ≈ 90 s）⇒ ``generate`` 绝不能同步等图，接口只负责
 「收下请求 + 起线程 + 立刻回话」，结果靠 WS / 轮询拿。
 """
@@ -57,7 +57,7 @@ async def media_generator_state() -> dict:
 async def media_generator_generate(payload: Optional[dict] = None) -> dict:
     """发起一次出图。
 
-    入参：``{"prompt": "...", "steps": 8|20|28, "fixed_noise": false}``
+    入参：``{"prompt": "...", "steps": 8|20|28|40, "fixed_noise": false}``
 
     ``fixed_noise=True`` 用**固定初始噪声**（cshim 现场生成，与历史基线
     逐字节一致）⇒ 同一个提示词每次出**同一张图**，方便对拍与演示。

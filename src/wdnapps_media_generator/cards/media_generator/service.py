@@ -13,11 +13,11 @@
 多个消费者（卡片 / LAN 对端）。这与 TTS 卡是同一套机制。
 
 ⚠️ 耗时（板端实测，2×RK1828）：worker 首次 load 要 ~90 s（TE + DiT
-常驻），之后**每张图 33~125 s**（8 / 20 / 28 步）。所以本模块的所有接口都是
+常驻），之后**每张图 33~130 s**（8 / 20 / 28 / 40 步）。所以本模块的所有接口都是
 **异步**的：``generate`` 立刻返回，前端用 WebSocket 收状态。
 
 ⚠️ **超时**：worker 侧的推理预算是**每模型**的（写在 worker manifest 的
-``infer_timeout_s`` 里，文生图是 300 s）—— 全局默认 60 s 会把 20/28 步
+``infer_timeout_s`` 里，文生图是 300 s）—— 全局默认 60 s 会把 20/28/40 步
 的出图砍掉（``inference exceeded 60.0s``）。
 """
 from __future__ import annotations
@@ -42,8 +42,15 @@ LOG = logging.getLogger("apps.media_generator")
 CAPABILITY = "swcap_text_to_image"
 
 #: 允许的 flow-match 步数。步数是纯运行时参数（模型不用重建），
-#: 但太小的步数出图糊、太大的步数慢 —— 8 / 20 / 28 覆盖「快 / 推荐 / 精细」。
-VALID_STEPS = (8, 20, 28)
+#: 但太小的步数出图糊、太大的步数慢 —— 8 / 20 / 28 / 40 覆盖「快 / 中 / 精细 / 官方」。
+#:
+#: ⭐ **40 步是官方推荐值**：Qwen-Image-2.1 官方 README 的三个示例
+#:    （文生图 / 图像编辑 / RGBA）**全部**写 ``num_inference_steps=40``。
+#:    板端实测：8 步 33.5 s、20 步 69 s、28 步 93 s、40 步 ~129 s
+#:    （每步 ~2.98 s + 固定开销 ~9 s）⇒ 40 步仍在 infer_timeout_s=300 之内。
+#:    ⚠️ 但 8~20 步下**动态人体姿态/小脸会崩**（模型能力，不是量化），
+#:    28 步起才正常 —— 要出人像/运动场景请用 28 或 40 步。
+VALID_STEPS = (8, 20, 28, 40)
 DEFAULT_STEPS = 8
 
 #: 历史里最多保留多少张图（更早的连同落盘文件一起删）。
@@ -118,9 +125,16 @@ STAGE_ORDER = ("te", "flow", "vae", "save")
 
 #: 还没进入的阶段的**固定预估秒数**（板端实测值）。
 #: ETA = 当前阶段的剩余时间 + 后面这些阶段的预估值。
+#:
+#: ⚠️ ``vae`` 的值随 **VAE 跑在哪张卡** 而变：
+#:   * rknn2（本机 RK3588 NPU，3 核）：**~17 s/张**（w8a8 整图，板端实测）——
+#:     图里有几处 (1,C,H,W)→(C,1,H,W) 的大 Transpose 落回 CPU，
+#:     NPU 空转 ⇒ 墙钟由 CPU 回落算子主导，比 rknn3 的 4 段流式慢。
+#:   * rknn3（1828，与 DiT 共卡）：~10 s（4 段流式，每段 ~2 s）。
+#: 这里取 **rknn2 的实测值**（更保守 ⇒ 宁可高估也不要让用户以为卡住了）。
 STAGE_ETA_SECONDS = {
     "start": 1.0,
-    "te": 0.3, "flow": 0.0, "vae": 10.0, "save": 0.3,
+    "te": 0.3, "flow": 0.0, "vae": 17.0, "save": 0.3,
     "vae_init": 2.0, "release": 0.5,
 }
 
@@ -233,6 +247,15 @@ class ProgressTracker:
             elif st == stage:
                 frac = (step / total) if total else 0.0
                 percent += w * max(0.0, min(1.0, frac))
+        # ⭐ 收尾阶段强制 100%。
+        #    STAGE_WEIGHTS 是按 **rknn3 老路径**（te/flow/release/vae_init/
+        #    vae/save）配的，合计正好 1.0。而 rknn2 路径下 DiT 与 VAE
+        #    物理分开 ⇒ **没有 release、也没有 vae_init** ⇒ 按权重加出来
+        #    只有 0.98，卡片会永远停在 98%。
+        #    这里不按「哪条路径」分支，而是「跑完了就是 100%」—— 两条路径
+        #    的最后一个阶段都是 save（Python 侧收尾），语义一致。
+        if stage in ("save", "done"):
+            percent = 1.0
         percent = max(0.0, min(100.0, percent * 100.0))
 
         # ---- 还需多久 ----
@@ -248,10 +271,10 @@ class ProgressTracker:
             # 启动阶段会显示「启动中 · 即将完成」，自相矛盾。
             if stage == "start":
                 # 启动阶段还**一个 flow 步都没跑** ⇒ 没有实测均值，
-                # 只能用「每步 ~3.5 s + VAE ~12 s」估（板端实测：
-                # 8 步 33 s / 20 步 103 s / 28 步 124 s）。
+                # 只能用「每步 ~3.0 s + VAE ~17 s」估（板端实测：
+                # 8 步 33.5 s / 20 步 69 s / 28 步 93 s / 40 步 ~129 s）。
                 # 真正准的 ETA 要等第一个 flow 步到达（那时用实测均值）。
-                eta += 3.5 * max(0, total) + STAGE_ETA_SECONDS.get("vae", 12.0)
+                eta += 3.5 * max(0, total) + STAGE_ETA_SECONDS.get("vae", 17.0)
             else:
                 eta += STAGE_ETA_SECONDS.get(stage, 0.0)
         # 后面还没开始的阶段
@@ -420,7 +443,7 @@ class MediaGenSession:
     状态：``idle`` → ``running`` → ``idle`` / ``error``。
 
     生成在**独立线程**里跑（``asyncio.run`` 包一层）：FastAPI 的事件
-    循环不能被一次 35 s（8 步）/ 100 s（20 步）/ 125 s（28 步）的 NPU
+    循环不能被一次 35 s（8 步）/ 70 s（20 步）/ 95 s（28 步）/ 130 s（40 步）的 NPU
     调用堵住。
     """
 
@@ -524,7 +547,7 @@ class MediaGenSession:
     def start(self, req: ImageRequest) -> dict:
         """启动一次生成（**立即返回**，不等图出来）。
 
-        已经在跑 ⇒ 拒绝（文生图是**重**能力：33~125 s 一张，排队没有意义，
+        已经在跑 ⇒ 拒绝（文生图是**重**能力：33~130 s 一张，排队没有意义，
         用户自己再点一次更清楚）。
 
         模型**还没加载完** ⇒ 也拒绝，但要说清楚是「在加载」还是「压根没

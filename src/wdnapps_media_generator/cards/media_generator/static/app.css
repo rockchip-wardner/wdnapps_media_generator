@@ -241,3 +241,22 @@
 .mg-thumb:hover {
   border-color: var(--accent);
 }
+
+/* ------------------------------------------------------------------ *
+ * ⭐ 生成记录条目：缩略图在左、正文在右
+ *
+ * ⚠️ 宿主 framework.css 里的 `.vd-event-body` 是 `display:flex`（**行**
+ *    方向），而 `.vd-event-text` / `.vd-event-meta` 是两个 div ——
+ *    直接塞进去会被排成**同一行**，提示词后面粘着时间戳。
+ *    按 page id 限定作用域，不动宿主的共享类。
+ * ------------------------------------------------------------------ */
+#page-media-generator .vd-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+#page-media-generator .vd-event-body {
+  flex-direction: column;
+  min-width: 0;
+}
