@@ -90,6 +90,14 @@ PNG 落到 <resource_dir>/media_generator/runs/<run_id>/img01.png
 ## 安装
 
 ```bash
+cd <wdnwebui>/.venv/src
+git clone git@github.com:rockchip-wardner/wdnapps_media_generator.git
+pip install -e wdnapps_media_generator
+```
+
+或者直接装构建好的 wheel：
+
+```bash
 cd /home/rockchip/wdnwebui/.venv/src/wdnapps_media_generator
 .venv/bin/python -m build --wheel        # 或 python -m build
 pip install --force-reinstall dist/*.whl

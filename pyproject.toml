@@ -45,6 +45,11 @@ image = ["numpy>=1.21"]
 # `tts`、wdnapps-video-analyzer 的 `video-detection` 同规则。前端的
 # JS 命名空间是 `window.ImApp_media_generator`（连字符换下划线）。
 # ---------------------------------------------------------------------------
+[project.urls]
+Homepage = "https://github.com/rockchip-wardner/wdnapps_media_generator"
+Repository = "https://github.com/rockchip-wardner/wdnapps_media_generator"
+Issues = "https://github.com/rockchip-wardner/wdnapps_media_generator/issues"
+
 [project.entry-points."wdnwebui.cards"]
 "media-generator" = "wdnapps_media_generator.cards.media_generator"
 # ⭐ 图生图卡（同一个模型 Qwen-Image-2.1，输入图 + 文本 → 输出图）
