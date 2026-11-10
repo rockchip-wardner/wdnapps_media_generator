@@ -1,93 +1,107 @@
+[English](README.md) | [简体中文](README_CN.md)
+
 # wdnapps-media-generator
 
-wdnwebui 的**媒体生成类**应用插件。当前提供一张卡：**图片生成**
-（`media-generator`），后端是 Qwen-Image-2.1（512×512，RKNN3 / rk1820）。
+Media-generation application plugin for wdnwebui. It currently provides one card:
+**Image Generation** (`media-generator`), backed by Qwen-Image-2.1 (512×512,
+RKNN3 / rk1820).
 
-> 与其它 wdnapps 同结构：卡片目录 + `manifest.json` + `api.py` +
-> `service.py` + `static/`，靠 `pyproject.toml` 的
-> `[project.entry-points."wdnwebui.cards"]` 注册。
+> Same structure as the other wdnapps packages: a card directory + `manifest.json`
+> + `api.py` + `service.py` + `static/`, registered through
+> `[project.entry-points."wdnwebui.cards"]` in `pyproject.toml`.
 
-## 卡片
+## Cards
 
-本仓库有**两张卡**，同一个模型（`qwenimage21` = Qwen-Image-2.1）：
+This repository ships **two cards**, sharing the same model
+(`qwenimage21` = Qwen-Image-2.1):
 
 | | `media-generator` | `image-editor` |
 |---|---|---|
-| 显示名 | **图片生成** | **图片处理** |
-| 输入 | 一段文字 | **一张图 + 一段文字** |
-| 输出 | 512×512 PNG | 512×512 PNG |
-| 能力 | `swcap_text_to_image` | `swcap_text_to_image`（**同一个**） |
-| 路由前缀 | `/api/media-generator` | `/api/image-editor` |
-| 额外参数 | — | `image`（base64）、`strength`（0~1） |
+| Display name | **Image Generation** | **Image Editing** |
+| Input | a piece of text | **an image + a piece of text** |
+| Output | 512×512 PNG | 512×512 PNG |
+| Capability | `swcap_text_to_image` | `swcap_text_to_image` (**the same one**) |
+| Route prefix | `/api/media-generator` | `/api/image-editor` |
+| Extra parameters | — | `image` (base64), `strength` (0~1) |
 
-`image-editor` 排在应用网格里 `media-generator` 的**后面**（`display_order`
-66 vs 65），代码在同一个仓、同一个 `cards/` 目录下。
+`image-editor` is placed **after** `media-generator` in the app grid
+(`display_order` 66 vs 65); the code lives in the same repository, under the same
+`cards/` directory.
 
-### `image-editor` 的额外依赖：VAE **编码器**
+### The extra dependency of `image-editor`: the VAE **encoder**
 
-「图 + 文 → 图」比文生图多一步：**输入图要先变成潜变量**。
+"Image + text → image" needs one more step than text-to-image: **the input image has
+to become a latent first**.
 
-板端模型包 `Qwen-Image-2.1/` 里原本只有 VAE **解码器**
-（`vae_qwenimage21-512.3588.rknn`：输入 `latents` → 输出 `image`），
-**没有编码器** ⇒ 图进不了潜空间 ⇒ 图生图做不了。
+The board-side model package `Qwen-Image-2.1/` originally shipped only the VAE
+**decoder** (`vae_qwenimage21-512.3588.rknn`: input `latents` → output `image`) and
+**no encoder** ⇒ the image could not enter the latent space ⇒ image-to-image was
+impossible.
 
-现在补上了 **`vae_qwenimage21-512.encoder.3588.rknn`**（205 MB，rknn2 /
-rk3588 / fp16）：输入 `pixel_values` `[1,4,1,512,512]`（RGBA，[-1,1]）→
-输出 `latents` `[1,64,1,32,32]`。它和解码器**同在本机 3588 的 NPU** 上，
-实测**能同时常驻**（解码器 2311 MiB + 编码器 ≈ 0.9 GiB < 4 GiB 池）。
+Now the **`vae_qwenimage21-512.encoder.3588.rknn`** is there as well (205 MB, rknn2 /
+rk3588 / fp16): input `pixel_values` `[1,4,1,512,512]` (RGBA, [-1,1]) → output
+`latents` `[1,64,1,32,32]`. It and the decoder **reside together on this board's
+3588 NPU**, and are **measured to coexist** (decoder 2311 MiB + encoder ≈ 0.9 GiB
+< the 4 GiB pool).
 
-> ⚠️ 模型包里**没有**编码器时，图生图会**明确报错**
-> （「本机不支持图生图」），**不会**偷偷退化成文生图。
-> 文生图完全不受影响（编码器是可选件）。
+> ⚠️ When the model package has **no** encoder, image-to-image fails **explicitly**
+> ("image-to-image is not supported on this board") and **never** silently degrades
+> to text-to-image. Text-to-image is entirely unaffected (the encoder is optional).
 
-### 向导里的**拖拽上传**（`type: "image"`）
+### The wizard's **drag-and-drop upload** (`type: "image"`)
 
-`image-editor` 的向导第 2 步「原图与改法」带一个**拖拽上传区**：
-把图拖进去（或点一下选文件）⇒ 出预览 + 文件名 ⇒ 「下一步」变亮 ⇒
-「完成配置」后**自动开跑**（向导页看不到卡片进度条，卡片会提示去哪看）。
+Step 2 of the `image-editor` wizard, "Original Image and Edits", carries a
+**drag-and-drop upload area**: drop the image in (or click to pick a file) ⇒ a
+preview plus the file name appear ⇒ "Next" turns active ⇒ after "Finish Setup" it
+**starts running automatically** (the wizard page has no progress bar, so the card
+tells you where to look).
 
-用的是宿主向导新加的 **`"type": "image"`** 字段
-（`app/static/core/wizard/state.js::_buildImageField`）：
+It uses the **`"type": "image"`** field newly added to the host wizard
+(`app/static/core/wizard/state.js::_buildImageField`):
 
-| 项 | 值 |
+| Item | Value |
 |---|---|
-| 字段值 | **data URL**（`data:image/png;base64,…`） |
-| 落盘 | **不落 localStorage**（字段声明 `"transient": true`） |
-| 回填 | `applyWizardSnapshot(opts)` 里剥前缀拿裸 base64 |
+| Field value | **data URL** (`data:image/png;base64,…`) |
+| Persistence | **not stored in localStorage** (the field declares `"transient": true`) |
+| Backfill | `applyWizardSnapshot(opts)` strips the prefix and takes the bare base64 |
 
-⚠️ **为什么值是 data URL 而不是路径**：向导原有的「文件字段」那套
-（`browse` / `upload`）存的是**服务端路径**，要用 `upload_endpoint` +
-`thumbnail_endpoint` 两个后端端点。图片是**浏览器本地文件**，走那条路
-要多两个端点；而 data URL 直接能当 `<img src>` 预览、剥前缀就是本卡
-`/generate` 收的 base64 ⇒ 卡片侧几乎零改动。
+⚠️ **Why the value is a data URL and not a path**: the wizard's original "file
+field" mechanism (`browse` / `upload`) stores a **server-side path** and needs two
+backend endpoints, `upload_endpoint` + `thumbnail_endpoint`. An image is a
+**browser-local file**, and going that route means two more endpoints; a data URL
+can be previewed directly as an `<img src>` and, once the prefix is stripped, is
+exactly the base64 the card's `/generate` expects ⇒ almost no card-side change.
 
-⚠️ **base64 不能落 localStorage**：一张图几百 KB~几 MB，
-`localStorage.setItem` 是**整体覆盖** ⇒ 配额爆了会把**其它字段**
-（提示词、步数…）一起弄丢。宿主侧用 `"transient": true` 标记 + 落盘前剔除。
+⚠️ **base64 must not be stored in localStorage**: one image runs from a few hundred
+KB to a few MB, and `localStorage.setItem` is an **overwrite of the whole item** ⇒
+blowing the quota takes the **other fields** (prompt, step count, …) down with it.
+The host marks the field `"transient": true` and strips it before persisting.
 
-## 架构：图是在**别的进程**里出的
+## Architecture: the image is produced in **another process**
 
 ```
-浏览器
+browser
   │  POST /api/media-generator/generate
   ▼
-Web UI 进程（本插件的 service.py）
+Web UI process (this plugin's service.py)
   │  DDS RPC  run_prompt(prompt, output_dir=…)
   ▼
-worker 进程（compute_worker.py --model qwenimage21）
-  │  cshim → TE(卡0) + DiT(卡1) + VAE(卡1)
+worker process (compute_worker.py --model qwenimage21)
+  │  cshim → TE(card 0) + DiT(card 1) + VAE(card 1)
   ▼
-PNG 落到 <resource_dir>/media_generator/runs/<run_id>/img01.png
+PNG lands in <resource_dir>/media_generator/runs/<run_id>/img01.png
 ```
 
-* 模型**不在 Web UI 进程里跑** —— NPU 资源由算力注册中心统一分配，
-  worker 崩了不影响 UI；一个 worker 还能同时服务 LAN 对端。
-* 图的字节由 **worker 自己写**：后端把 `output_dir` 传进去，它写完 PNG
-  后**原样复制**过去 ⇒ 与运行时基线**逐字节一致**（不重新编码）。
-  回退路径（worker 没落盘）由本插件用**同样的 PNG 参数**自己编码，
-  字节仍然一致。
+* The model **does not run inside the Web UI process** — NPU resources are
+  allocated centrally by the compute registry, a crashed worker does not take the UI
+  down, and one worker can serve a LAN peer at the same time.
+* The image bytes are **written by the worker itself**: the backend passes
+  `output_dir` in and the worker **copies the PNG over verbatim** ⇒ byte-for-byte
+  identical to the runtime baseline (no re-encoding). The fallback path (worker did
+  not write to disk) has this plugin encode it with the **same PNG parameters**, so
+  the bytes still match.
 
-## 安装
+## Installation
 
 ```bash
 cd <wdnwebui>/.venv/src
@@ -95,140 +109,161 @@ git clone git@github.com:rockchip-wardner/wdnapps_media_generator.git
 pip install -e wdnapps_media_generator
 ```
 
-或者直接装构建好的 wheel：
+Or install the pre-built wheel directly:
 
 ```bash
 cd /home/rockchip/wdnwebui/.venv/src/wdnapps_media_generator
-.venv/bin/python -m build --wheel        # 或 python -m build
+.venv/bin/python -m build --wheel        # or python -m build
 pip install --force-reinstall dist/*.whl
 ```
 
-装完 **重启 Web UI**（卡片是开机时扫描 entry points 的）。
+After installing, **restart the Web UI** (cards are scanned at boot by scanning entry
+points).
 
-### ⚠️ package-data 漏了会怎样
+### ⚠️ What happens when package-data is missing
 
-`pyproject.toml` 的 `[tool.setuptools.package-data]` 必须含
-`manifest.json` 与 `static/*`。漏了的话：卡片**仍会被发现**（manifest
-在包外层），但 `/static/apps/media-generator/` 是空的 ⇒ 前端 404。
-editable 装法看不出来（源码就在那儿），只有真 wheel 才暴露。
+`[tool.setuptools.package-data]` in `pyproject.toml` must contain `manifest.json` and
+`static/*`. Without them the card **is still discovered** (the manifest sits at the
+outer package level), but `/static/apps/media-generator/` ends up empty ⇒ the front
+end 404s. An editable install hides this (the sources are right there); only a real
+wheel exposes it.
 
-## 宿主侧还需要两处配合
+## Two more things the host side needs
 
-1. **`app/static/index.html.template` 加卡位**：
+1. **A card slot in `app/static/index.html.template`**:
 
    ```html
    {% card_slot "media-generator" %}
    ```
 
-   宿主把每个卡片的 HTML 片段注入到 index.html 的对应占位符；没有占位符
-   ⇒ 卡片点开是**空白页**（卡片本身在应用列表里是正常显示的）。
+   The host injects each card's HTML fragment into the matching placeholder in
+   index.html; without the placeholder, opening the card gives a **blank page**
+   (the card itself still shows up normally in the app list).
 
-2. **模型目录 + worker manifest**：见下面「模型与 worker」。
+2. **Model directory + worker manifest**: see "Models and Workers" below.
 
-## 模型与 worker
+## Models and Workers
 
-worker 的 manifest 放在**模型文件夹**里（一个文件夹 = 一个安装单元）：
+The worker's manifest lives in the **model folder** (one folder = one distribution
+unit):
 
 ```
 /mnt/oem/models/Qwen-Image-2.1/qwenimage21.json     ← manifest
-/mnt/oem/models/Qwen-Image-2.1/...                   ← 模型文件
+/mnt/oem/models/Qwen-Image-2.1/...                   ← model files
 ```
 
-板上 `/mnt/oem` 只有 558 MB 空闲（放不下 9.4 GB 的模型），所以本板用
-**软链**把模型包挂进来：
+On this board `/mnt/oem` has only 558 MB free (not enough for the 9.4 GB model), so
+this board mounts the model package in with a **symlink**:
 
 ```bash
 ln -s /home/rockchip/models/Qwen-Image-2.1 /mnt/oem/models/Qwen-Image-2.1
 ```
 
-⚠️ **模型目录名 = HF 仓库名**（`Qwen/Qwen-Image-2.1` ⇒ `Qwen-Image-2.1`），
-与 `/mnt/oem/models/` 下其它包（`Qwen3-VL-4B` / `Qwen3-TTS` /
-`LocateAnything-3B`）同规则；而 **manifest 的文件名 = model_id**
-（`qwenimage21.json`）⇒ 它同时是 worker 的 `--model` 参数与 `/proc` 去重
-needle，**改目录名不要改它**。改名后同步 manifest 的 `model_dir_name` 即可
-（发现规则是「manifest 所在目录 = 模型目录」，代码不依赖目录名）。
+⚠️ **The model directory name = the HF repository name** (`Qwen/Qwen-Image-2.1` ⇒
+`Qwen-Image-2.1`), the same rule as the other packages under `/mnt/oem/models/`
+(`Qwen3-VL-4B` / `Qwen3-TTS` / `LocateAnything-3B`); and **the manifest's filename =
+the model_id** (`qwenimage21.json`) ⇒ it is simultaneously the worker's `--model`
+argument and the `/proc` dedup needle, so **do not change it when renaming the
+directory**. After renaming, just sync the manifest's `model_dir_name` (the
+discovery rule is "the directory the manifest sits in is the model directory"; the
+code does not depend on the directory name).
 
-manifest 里 `model_dir_env = WDNAI_QWEN_IMAGE_21_DIR` —— worker 启动时
-会把它指到 manifest 所在目录，wdnai 认这个环境变量。
+The manifest declares `model_dir_env = WDNAI_QWEN_IMAGE_21_DIR` — the worker points
+it at the manifest's own directory at startup, and wdnai honours that env var.
 
-manifest 需要 `requires_cards: 2`（TE 在卡 0、DiT+VAE 在卡 1）。
+The manifest needs `requires_cards: 2` (TE on card 0, DiT+VAE on card 1).
 
-### ⚠️ `infer_timeout_s`：一次推理的预算是**每模型**的
+### ⚠️ `infer_timeout_s`: an inference budget is **per model**
 
-worker 侧的推理预算是「replier pump 最多被一次推理占多久」，超了就回一条
-**带原因**的错误（而不是把 pump 焊死）。它**不能是全局常量**：
+The worker-side inference budget is "how long the replier pump may be occupied by a
+single inference"; when it is exceeded the worker returns an error **with a reason**
+(rather than wedging the pump). It **must not be a global constant**:
 
-* 全局 60 s ⇒ 20/28 步出图（实测 103 s / 124 s）必被砍掉，报
-  `TimeoutError: inference exceeded 60.0s`；
-* 全局调大 ⇒ 一个卡住的对话 worker 会长时间占着 pump。
+* a global 60 s ⇒ the 20/28-step generation (measured at 103 s / 124 s) always gets
+  cut off, reporting `TimeoutError: inference exceeded 60.0s`;
+* a global bump ⇒ one stuck chat worker holds the pump for a long time.
 
-⇒ 所以它写在 **manifest** 里（文生图 = 300 s）：
+⇒ So it lives in the **manifest** (text-to-image = 300 s):
 
 ```json
 "infer_timeout_s": 300
 ```
 
-worker 用它当 pump 上限，Web UI 主进程用 **它 + 30 s margin** 当客户端
-RPC 预算（客户端必须比 worker 活得久，否则先超时的是客户端 ⇒ 报错没有
-原因可查）。两边读**同一个 manifest 文件** ⇒ 预算不会漂移。
+The worker uses it as the pump ceiling, while the Web UI main process uses **it + a
+30 s margin** as the client-side RPC budget (the client must outlive the worker, or
+the client times out first ⇒ an error with nothing to diagnose). Both sides read
+the **same manifest file** ⇒ the budget cannot drift.
 
-## 接口
+## API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/api/media-generator/` | 状态快照 |
-| POST | `/api/media-generator/generate` | 发起出图（**立即返回**） |
-| POST | `/api/media-generator/stop` | 请求取消当前这次 |
-| GET | `/api/media-generator/history` | 生成记录 |
-| GET | `/api/media-generator/image/{run_id}` | 取 PNG |
-| WS | `/api/media-generator/ws` | 状态推送 |
+| GET | `/api/media-generator/` | status snapshot |
+| POST | `/api/media-generator/generate` | start a generation (**returns immediately**) |
+| POST | `/api/media-generator/stop` | request cancellation of the current run |
+| GET | `/api/media-generator/history` | generation history |
+| GET | `/api/media-generator/image/{run_id}` | fetch the PNG |
+| WS | `/api/media-generator/ws` | status push |
 
-## 界面
+## UI
 
-* **提示词框** + 步数（8 / 20 / 28）+ 「固定噪声」开关。
-* **进度条**：实时显示
-  * 当前阶段与这一步在做什么（`flow-match 第 3/8 步` / `VAE 第 2/4 段`）
-  * **这一步**花了多久、**平均每步**多久、已用多久
-  * **预计还需**多久（ETA = 剩余步数 × 平均每步 + 后续阶段预估值）
-  * 整条流水线的百分比
-* **结果图** + 生成记录（点缩略图回看）。
+* **Prompt box** + step count (8 / 20 / 28) + a "fixed noise" toggle.
+* **Progress bar**: shows in real time
+  * the current stage and what this step is doing (`flow-match step 3/8` /
+    `VAE segment 2/4`)
+  * how long **this step** took, how long **each step averages**, how long in total
+  * **how much is left** (ETA = remaining steps × average per step + estimate for the
+    later stages)
+  * the percentage of the whole pipeline
+* **Result image** + generation history (click a thumbnail to look back).
 
-进度是 worker 通过 DDS delta 通道推过来的**结构化事件**
-（`qi|stage=flow|step=3|total=8|elapsed_ms=2601.5`）⇒ 卡片的
-`service.py` 解析后折成进度条的各个字段。
+Progress arrives as **structured events** pushed over the DDS delta channel
+(`qi|stage=flow|step=3|total=8|elapsed_ms=2601.5`) ⇒ the card's `service.py`
+parses them into the fields of the progress bar.
 
-### ⚠️ 点击后**必须立刻**有反馈（2026-11-04 用户反馈后修）
+### ⚠️ There must be **immediate** feedback after the click (fixed after the 2026-11-04 user report)
 
-用户反馈「点了生成图片就一直卡在那，进度条要非常久之后才出来，也没提示
-在做什么」。根因是三个**反馈空窗**叠在一起：
+The user reported "I click generate image and it just hangs there; the progress bar
+takes a very long time to show up, and there is no hint about what it is doing". The
+root cause was three **feedback gaps** stacked on top of each other:
 
-| # | 空窗 | 修法 |
+| # | Gap | Fix |
 |---|---|---|
-| 1 | worker 的第一条 `qi|` 事件要等它真开始干活（TE 编码 + 首步）才到，最快 1~4 秒 ⇒ 这之前快照里 `progress` 是 `None` ⇒ **前端把进度条整个 `hidden` 了** | ① 后端 `start()` 立刻塞一条 `stage="start"` 事件；② 前端 **busy 时进度条不许消失**（无事件时显示「启动中 · 0%」） |
-| 2 | `doGenerate()` 里 `await postJSON()` 之后**直接返回** ⇒ 界面一动不动，要等下一次 WS 帧（最快 1 s）或兜底轮询（最慢 5 s）才知道「点了」 | 点击即刻：按钮禁用 + 变「提交中…」+ meta/hint 说清楚 + 进度条亮起来；POST 成功后**立刻** `pollSnapshot()` 一次 |
-| 3 | 向导模式里自动出图时**卡片页是隐藏的** ⇒ 向导界面自己又没有进度显示 ⇒ 用户面对一个「什么都没发生」的结束画面 | 向导完成后明确提示「已开始生成，请到「图片生成」页看实时进度」 |
+| 1 | The worker's first `qi|` event only arrives once it really starts working (TE encoding + first step), at the earliest 1~4 s ⇒ before that `progress` is `None` in the snapshot ⇒ **the front end hid the whole progress bar** | ① the backend's `start()` immediately pushes a `stage="start"` event; ② the progress bar **must not disappear while busy** (with no event yet it shows "starting · 0%") |
+| 2 | `doGenerate()` **returns right after** `await postJSON()` ⇒ the UI does not move, and it takes the next WS frame (earliest 1 s) or the fallback poll (latest 5 s) to learn that the click registered | on click: disable the button, turn it into "submitting…", spell it out in meta/hint, light up the progress bar; after the POST succeeds **immediately** call `pollSnapshot()` once |
+| 3 | In wizard mode the auto-generation runs **while the card page is hidden** ⇒ the wizard UI itself has no progress display ⇒ the user faces an ending screen where "nothing happened" | after the wizard finishes, clearly state "generation started, go to the 'Image Generation' page for live progress" |
 
-修完实测（headless chromium，8 步）：
+Measured after the fix (headless chromium, 8 steps):
 
-| 时刻 | 界面 |
+| Moment | UI |
 |---|---|
-| **t = 0.22 s** | 进度条已亮：「启动中」0%，按钮禁用，meta「正在生成（8 步）…」 |
-| t = 0.34 s | 「编码提示词：文本编码 第 1/1 张，预计还需 31 秒」2% |
-| t = 3.3 s | 「生成图像：flow-match 第 1/8 步，预计还需 29 秒」12% |
-| … | 每步实时推进 |
-| t = 33.4 s | 「完成」99% → 出图（33.3 s） |
+| **t = 0.22 s** | progress bar lit: "starting" 0%, button disabled, meta "generating (8 steps)…" |
+| t = 0.34 s | "encoding prompt: text encoding image 1/1, ~31 s remaining" 2% |
+| t = 3.3 s | "generating image: flow-match step 1/8, ~29 s remaining" 12% |
+| … | advances in real time per step |
+| t = 33.4 s | "done" 99% → image out (33.3 s) |
 
-复现脚本：`scripts/probe_click_timeline.py`（webui 仓库，headless chromium
-点一次「生成图片」，每 100 ms 抓一次 DOM + 记录 WS 帧到达时刻）。
+Reproduction script: `scripts/probe_click_timeline.py` (in the webui repository,
+headless chromium clicks "generate image" once and grabs the DOM every 100 ms while
+recording WS frame arrival times).
 
-## 已知边界
+## Known boundaries
 
-* **停止打不断正在跑的那次**：出图是一次 NPU 调用（C 侧不可中断），
-  「停止」= 这一张的结果不要了。
-* **一次只跑一张**：再点「生成」会返回 409。出图是重能力，排队没有意义。
-* **步数**只影响采样步数，不影响模型（模型不用重建）。
-* **模型没加载完时不能出图**：`generate` 会返回 409 并说明是「正在加载」
-  还是「压根没启用」——别去猜，直接看提示。
-* **推理超时会翻成人话**：worker 侧报
-  `inference exceeded Ns` 时，卡片显示「推理超时：worker 侧的推理预算用完了
-  （NPU 可能卡住了）……（原文：…）」，并建议去算力配置页重启该实例。
+* **Stop cannot interrupt the run in progress**: generating an image is one NPU call
+  (not interruptible from the C side), so "stop" means "do not want the result of
+  this one".
+* **Only one at a time**: clicking "generate" again returns 409. Generating an image
+  is heavy, so queueing makes no sense.
+* **Step count** only affects the number of sampling steps, not the model (the model
+  is not rebuilt).
+* **No generation before the model has finished loading**: `generate` returns 409 and
+  says whether it is "still loading" or "not enabled at all" — don't guess, read the
+  message.
+* **Inference timeouts are translated into plain language**: when the worker reports
+  `inference exceeded Ns`, the card shows "inference timed out: the worker-side
+  inference budget ran out (the NPU may be stuck)… (original: …)" and suggests
+  restarting that instance from the compute configuration page.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
