@@ -3,7 +3,7 @@
   "title": "图片处理",
   "category": "image",
   "description": "上传一张图片并使用文字描述来修改图片内容",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "preview_video": "/static/apps/image-editor/preview.mp4",
   "preview_image": "",
   "software_capabilities": [

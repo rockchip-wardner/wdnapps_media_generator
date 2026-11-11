@@ -3,7 +3,7 @@
   "title": "图片生成",
   "category": "image",
   "description": "输入一段文字，生成512x512的图片",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "preview_video": "/static/apps/media-generator/preview.mp4",
   "preview_image": "",
   "software_capabilities": [
