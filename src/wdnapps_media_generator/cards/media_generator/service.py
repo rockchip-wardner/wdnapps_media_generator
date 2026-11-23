@@ -386,11 +386,11 @@ def _write_png(path: Path, bgr: Any) -> bool:
     try:
         import numpy as np
     except ImportError:
-        LOG.warning("回退编码 PNG 需要 numpy，未安装 —— 该图无法落盘")
+        LOG.warning("the PNG fallback encoding needs numpy, which is not installed - the image cannot be written to disk")
         return False
     arr = np.ascontiguousarray(bgr, dtype=np.uint8)
     if arr.ndim != 3 or arr.shape[2] != 3:
-        LOG.warning("回退编码 PNG：期望 HxWx3，得到 %s", arr.shape)
+        LOG.warning("falling back to encoding PNG: HxWx3 expected, got %s", arr.shape)
         return False
     rgb = np.ascontiguousarray(arr[:, :, ::-1])
     h, w, _ = rgb.shape
@@ -619,7 +619,7 @@ class MediaGenSession:
         try:
             png = self._generate(req)
         except Exception as exc:  # noqa: BLE001
-            LOG.exception("media_generator: 生成失败")
+            LOG.exception("media_generator: the generation failed")
             with self._lock:
                 self._elapsed = time.time() - t0
             self._set_state(self.STATE_ERROR, friendly_error(exc))
@@ -629,7 +629,7 @@ class MediaGenSession:
             self._elapsed = time.time() - t0
             cancelled = self._cancel
         if cancelled:
-            LOG.info("media_generator: run %s 已被取消（结果丢弃）", req.run_id)
+            LOG.info("media_generator: run %s was cancelled (the result is dropped)", req.run_id)
             self._set_state(self.STATE_IDLE)
             return
 

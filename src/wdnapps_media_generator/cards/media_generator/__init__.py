@@ -24,7 +24,7 @@ def register_api(app: FastAPI) -> None:
     """把本卡的 API 挂到宿主 app 上。"""
     from wdnapps_media_generator.cards.media_generator.api import router
     app.include_router(router, prefix=API_PREFIX)
-    LOG.info("[media-generator] API 已挂载于 %s", API_PREFIX)
+    LOG.info("[media-generator] the API is mounted at %s", API_PREFIX)
 
 
 def register_shutdown() -> None:
@@ -40,4 +40,4 @@ def register_shutdown() -> None:
         )
         get_session().close()
     except Exception:  # noqa: BLE001
-        LOG.debug("[media-generator] shutdown 清理失败（忽略）", exc_info=True)
+        LOG.debug("[media-generator] the shutdown cleanup failed (ignored)", exc_info=True)
